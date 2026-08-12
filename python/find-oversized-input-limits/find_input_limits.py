@@ -543,13 +543,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             written.parent.mkdir(parents=True, exist_ok=True)
             written.write_text(report, encoding="utf-8")
     elif args.summary:
-        by_file = Counter(f.path for f in findings)
+        # Sorted by count then name rather than Counter.most_common(), whose tie
+        # order follows os.walk() and so differs between machines.
+        by_file = Counter(_rel(f.path, base) for f in findings)
         by_kind = Counter(f.kind for f in findings)
-        for path, count in by_file.most_common():
-            print(f"{count:>5}  {_rel(path, base)}")
-        print()
-        for kind, count in by_kind.most_common():
-            print(f"{count:>5}  {kind}")
+        for group in (by_file, by_kind):
+            for name, count in sorted(group.items(), key=lambda kv: (-kv[1], kv[0])):
+                print(f"{count:>5}  {name}")
+            if group is by_file:
+                print()
     else:
         for f in findings:
             print(f.format(base))
