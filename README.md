@@ -10,11 +10,28 @@ Small, self-contained tools that solve one problem well and run anywhere. Each
 snippet is a folder you can copy into a project, or run in place against any
 codebase — no install step, no framework, no shared runtime between them.
 
+## Layout
+
+Snippets are grouped by the language you need installed to run them, then by
+what the snippet does:
+
+```
+<language>/<what-it-does>/
+```
+
+A snippet's language folder is about its runtime, not its reach — the Python
+tool below scans TypeScript, PHP, Go, and Java codebases just fine.
+
 ## Snippets
+
+### python
 
 | Snippet | What it does |
 | --- | --- |
-| [find-oversized-input-limits](find-oversized-input-limits/) | Finds every declared user-input character limit above a threshold, across every common fullstack — HTML, React, Angular, Django, Pydantic, Zod, Laravel, Rails, Go, Spring, .NET, SQL |
+| [find-oversized-input-limits](python/find-oversized-input-limits/) | Finds every declared user-input character limit above a threshold, across every common fullstack — HTML, React, Angular, Django, Pydantic, Zod, Laravel, Rails, Go, Spring, .NET, SQL |
+
+Needs Python 3.9+ on PATH. The launchers pick the first available `python`,
+`python3`, or `py`.
 
 ## Conventions
 
@@ -29,11 +46,6 @@ all of them:
 - **Exit code 0 when clean, 1 when the tool found something**, so any snippet can
   be dropped into CI as a gate without a wrapper.
 - **`-help` works**, alongside `--help`, `--h`, `-h`, and `-?`.
-
-## Requirements
-
-Python 3.9+ on PATH. The launchers pick the first available `python`,
-`python3`, or `py`.
 
 ## License
 
