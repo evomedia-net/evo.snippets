@@ -1,0 +1,10 @@
+# PowerShell is happiest with CRLF on Windows.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# Shell launchers must stay LF: a trailing CR makes the kernel look for an
+# interpreter named "bash\r" and the script dies with "bad interpreter".
+*.sh text eol=lf
+
+# Python is LF everywhere.
+*.py text eol=lf
