@@ -81,7 +81,7 @@ python check_no_local_paths.py
 ```
 
 It refuses any tracked file that contains a path from a developer's own
-machine (`F:\...`, `/mnt/f/...`, `C:\Users\...`). Usage examples use
+machine — a drive-letter path, a WSL mount, a Windows profile directory. Usage examples use
 `C:\path\to\project` or `/path/to/project` instead — an example that only
 works on the author's disk is an example that works nowhere.
 
