@@ -80,6 +80,10 @@ There is one, and it runs with nothing installed:
 python check_no_local_paths.py
 ```
 
+CI runs it on every push to `main` and every pull request
+([`.github/workflows/checks.yml`](.github/workflows/checks.yml)); a red check
+on a pull request means an example points at somebody's own disk.
+
 It refuses any tracked file that contains a path from a developer's own
 machine — a drive-letter path, a WSL mount, a Windows profile directory. Usage examples use
 `C:\path\to\project` or `/path/to/project` instead — an example that only
