@@ -25,7 +25,7 @@ Output format (two dashes) -- writes ./oversized-limits.<ext> unless redirected:
 
 Usage:
     python find_input_limits.py                        # scan cwd, limit > 2500
-    python find_input_limits.py F:/evomedia.net/www --limit 2000
+    python find_input_limits.py /path/to/project --limit 2000
     python find_input_limits.py . +ts +web             # frontend only
     python find_input_limits.py . -sql -config         # skip schema/config noise
     python find_input_limits.py . +json +py --json     # -> ./oversized-limits.json

@@ -13,7 +13,7 @@
     works as a CI gate.
 
 .EXAMPLE
-    .\run.ps1 F:\evomedia.net\www
+    .\run.ps1 C:\path\to\project
     .\run.ps1 . +py +json          # scan ONLY Python and JSON
     .\run.ps1 . -py -json          # scan everything EXCEPT Python and JSON
     .\run.ps1 . +json +py --json   # -> .\oversized-limits.json

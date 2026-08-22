@@ -72,6 +72,19 @@ all of them:
 
 MIT — see [LICENSE](LICENSE). Use them, fork them, ship them in your own work.
 
+## Checks
+
+There is one, and it runs with nothing installed:
+
+```
+python check_no_local_paths.py
+```
+
+It refuses any tracked file that contains a path from a developer's own
+machine (`F:\...`, `/mnt/f/...`, `C:\Users\...`). Usage examples use
+`C:\path\to\project` or `/path/to/project` instead — an example that only
+works on the author's disk is an example that works nowhere.
+
 ## Contact
 
 Kelly Michels · [dev@evomedia.net](mailto:dev@evomedia.net) ·
