@@ -24,7 +24,7 @@ Run it
 
     ./run.sh /path/to/project
 
-    .\run.ps1 F:\evomedia.net\www
+    .\run.ps1 C:\path\to\project
 
 Both launchers pass every argument through and handle Node version detection.
 

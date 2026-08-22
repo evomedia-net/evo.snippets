@@ -25,7 +25,7 @@ markup, the client validator, the server validator, and the column.
 ```
 
 ```powershell
-.\run.ps1 F:\evomedia.net\www
+.\run.ps1 C:\path\to\project
 ```
 
 Both launchers pass every argument through and handle Node version detection.
