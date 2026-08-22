@@ -19,7 +19,7 @@ Run it
 
     ./run.sh /path/to/project
 
-    .\run.ps1 F:\evomedia.net\www
+    .\run.ps1 C:\path\to\project
 
 Both launchers pass every argument through to find_input_limits.py and pick
 the first available python / python3 / py on PATH. Python 3.9+, stdlib only.
