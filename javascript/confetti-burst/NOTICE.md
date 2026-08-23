@@ -1,0 +1,62 @@
+<!--
+Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+Created by Kelly Michels · dev@evomedia.net
+-->
+
+# Third-party content in this snippet
+
+The repository is MIT licensed. **`confetti.mp3` is not** — it is
+third-party content under a separate licence, included here so the demo
+has something to play. Read this before shipping it anywhere.
+
+## confetti.mp3
+
+| | |
+| --- | --- |
+| Title | 1gift-confetti |
+| Author | u_jspnqv1glx |
+| Source | Pixabay — https://pixabay.com/sound-effects/search/confetti/ |
+| Licence | [Pixabay Content License](https://pixabay.com/service/license-summary/) |
+| Attribution | Not required. Credit given anyway: **Sound Effect by u_jspnqv1glx from Pixabay** |
+| Retrieved | 23 August 2026 |
+| SHA-256 | `da10255375fd9ec571558431f2b289d0…` |
+
+Published after 9 January 2019, so it is under the Pixabay Content
+License rather than CC0. That distinction matters: CC0 content carries no
+restrictions, and this does.
+
+### What the licence allows
+
+An irrevocable, worldwide, perpetual, non-exclusive, royalty-free right
+to download, use, copy, modify or adapt it for **commercial or
+non-commercial** purposes. No attribution required.
+
+### The restriction that applies to a snippet like this
+
+> You cannot sell or distribute the Content (either in digital or
+> physical form) on a **Standalone** basis … as an image, audio, video,
+> NFT or other digital file.
+
+"Standalone" means no creative effort applied and substantially the same
+form as on Pixabay. **This file is exactly that** — an unmodified copy.
+
+Bundling it as the demo's default sound is fine: it is a component of a
+larger work, not the product. But if you copy this snippet into
+something you distribute:
+
+- Combining it with your own confetti, timing and UI is **not**
+  standalone use, and is what the licence contemplates.
+- **Re-hosting the raw file for download, or shipping it as an audio
+  asset in its own right, is closer to the line.** Re-encoding and
+  trimming it is creative effort applied, removes the ambiguity, and
+  usually sounds better in context anyway.
+- Do not use it in a political, offensive, or misleading context, or as
+  part of a trade name — the licence forbids all of those.
+
+### Or bring your own
+
+The demo's **Use sound** control takes any audio file from your machine,
+so nothing here depends on this particular clip. The renderer itself has
+no audio at all: sound is the caller's business, because browsers refuse
+to play it without prior user interaction and only the caller knows
+whether that has happened.
