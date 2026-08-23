@@ -37,8 +37,8 @@ Use
     <script src="confetti.js"></script>
     <script>
       confettiBurst();                        // straight up from the middle
-      confettiBurst({ origin: 7 });           // from the top-left corner
-      confettiBurst({ origin: 3, direction: 315, count: 200 });
+      confettiBurst({ origin: 21 });          // from the top-left corner
+      confettiBurst({ origin: 5, direction: 315, count: 200 });
     </script>
 
 It creates its own canvas on the first call and removes nothing - call it as
@@ -47,30 +47,44 @@ often as you like.
 Firing positions
 ----------------
 
-Positions are numbered like a numpad, so the corner keys are the screen
-corners:
+Positions are numbered like a numpad, on a 5×5 grid, so the corner keys are
+the screen corners and 13 is dead centre:
 
-    7  8  9      top-left     top      top-right
-    4  5  6      left       centre     right
-    1  2  3      bottom-left  bottom   bottom-right
+    21 22 23 24 25      top-left    ..    top    ..    top-right
+    16 17 18 19 20
+    11 12 13 14 15      left        ..   centre  ..    right
+     6  7  8  9 10
+     1  2  3  4  5      bottom-left ..   bottom  ..    bottom-right
 
 Each key carries its own aim as well as its position, because the two are
 not independent: a corner cannon firing straight up throws half its pieces
 off-screen, and one at the top throws all of them.
 
-Fractions slide between neighbouring keys - position and aim together - so a
-row of cannons is written 7, 7.5, 8, 8.5, 9: five evenly spaced across the
-top edge, each leaning a little further round than the last. Consecutive keys
-are adjacent within a row, so every row takes half steps. 3.5 and 6.5 are
-the two that step between rows and slide diagonally across the middle: defined,
-and rarely what anyone wants.
+This was a 3×3 until the half-steps earned cells of their own. The nine
+positions it had are all still here - 1 3 5 11 13 15 21 23 25 keep their old
+origins and their old hand-tuned aims, so a corner burst looks exactly as it
+did. The sixteen new cells aim inward with a slight upward bias, which lands
+within a few degrees of the tuned nine.
+
+A row of cannons across the top is 21, 22, 23, 24, 25 - whole numbers reach
+every position now, where the 3×3 needed 7, 7.5, 8, 8.5, 9 to say the same
+thing. Fractions still slide between neighbouring keys, position and aim
+together, so they remain available as a quarter-step. Consecutive keys are
+adjacent within a row; the four that step between rows (5.5, 10.5,
+15.5, 20.5) slide diagonally across the screen: defined, and rarely what
+anyone wants.
 
 A volley is just repeated calls - the renderer draws one burst, and the caller
 decides how many and how far apart:
 
-    [1, 3, 9, 7].forEach(function (at, i) {
+    [1, 5, 25, 21].forEach(function (at, i) {
       setTimeout(function () { confettiBurst({ origin: at, count: 60 }); }, i * 220);
     });
+
+loop does the simplest version of this for you - the same burst again, up to
+ten times:
+
+    confettiBurst({ origin: 13, loop: 3, loopDelay: 600 });
 
 The playground
 --------------
@@ -125,11 +139,14 @@ Options
 | Option | Default | What it does |
 | --- | --- | --- |
 | count | 140 | pieces in this burst |
-| origin | { x: 0.5, y: 0.62 } | 1-9 for a numpad position (fractions allowed), or {x, y} in fractions of the viewport |
+| origin | { x: 0.5, y: 0.62 } | 1-25 for a numpad position on the 5×5 grid (fractions allowed), or {x, y} in fractions of the viewport |
 | direction | position's own aim, else 0 | a compass: 0 straight up, 90 right, 180 straight down, 270 left. Wraps, so 350 and -10 are the same aim |
 | spread | 70 | degrees of cone around the aim |
 | velocity | 34 | launch speed, px per frame at 60fps, applied straight to position |
 | gravity | 1 | multiplier on the built-in constant |
+| acceleration | 5 | how fast the launch speed bleeds off, on a 1-10 scale where 5 is the natural-looking rate. The multiplier is acceleration / 5, so 2.5 is half the pull and 7.5 half again as much. It scales gravity rather than replacing it - gravity is the raw constant, this is the dial. 1 is the floor because 0 is not a slow burst, it is no fall at all. Note the rise is drag-limited on this renderer, so the peak height moves about 27% across the whole range while the fall speed changes a great deal |
+| loop | 1 | fire the same burst again, up to 10 times. Clamped, because a runaway loop is a browser you have to kill |
+| loopDelay | 700 | milliseconds between repeats |
 | age | 9 | seconds a piece lives. Most leave the bottom of the screen well before this, so it mainly governs the ones that drift |
 | scalar | 1 | size multiplier |
 | drift | 0 | a steady sideways push, for wind |

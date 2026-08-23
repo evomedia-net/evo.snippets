@@ -131,17 +131,20 @@
 }
 
 /* ── the numpad ─────────────────────────────────────────────────────── */
-/* Laid out so 1 3 7 9 sit where the screen corners are. */
+/* Laid out so 1 5 21 25 sit where the screen corners are, 13 in the
+   middle. Twenty-five keys in the width the nine used to take, so the
+   buttons lose a little height and a little type rather than the panel
+   growing to swallow its neighbours. */
 .cbp-pad {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.3rem;
-  max-width: 10.5rem;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.22rem;
+  max-width: 12.5rem;
 }
 .cbp-pad button {
-  height: 2.1rem;
+  height: 1.75rem;
   padding: 0;
-  font: 600 0.85rem/1 var(--cbp-mono);
+  font: 600 0.72rem/1 var(--cbp-mono);
   font-variant-numeric: tabular-nums;
   color: var(--cbp-muted);
   background: var(--cbp-surface);
@@ -161,9 +164,29 @@
 .cbp-aims { display: grid; gap: 0.4rem; }
 .cbp-aim {
   display: grid;
-  grid-template-columns: 2.1rem 1fr auto;
+  grid-template-columns: 2.1rem 1.15rem 1fr auto;
   gap: 0.5rem;
   align-items: center;
+}
+
+/* Which way this cannon points, as a picture rather than a number to
+   convert. Drawn pointing up because up is 0 on the compass the aim
+   uses, so the rotation IS the bearing. */
+.cbp-aim-arrow {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  color: var(--cbp-accent);
+  transition: transform 0.18s ease;
+}
+.cbp-aim-arrow svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .cbp-aim-at {
   font: 600 0.8rem/1 var(--cbp-mono);
@@ -210,6 +233,15 @@
 .cbp input[type="text"] { font-family: var(--cbp-mono); }
 
 .cbp-check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; }
+.cbp-check output {
+  margin-left: auto;
+  font-family: var(--cbp-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--cbp-accent);
+}
+.cbp input[type="range"]:disabled { opacity: 0.45; cursor: default; }
 .cbp-check input { width: 15px; height: 15px; accent-color: var(--cbp-accent); cursor: pointer; }
 .cbp input[type="file"] { font-size: 0.78rem; color: var(--cbp-muted); max-width: 100%; }
 

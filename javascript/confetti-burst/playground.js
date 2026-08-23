@@ -30,13 +30,23 @@ window.confettiPlayground = (function () {
   var DEFAULTS = {
     count: 165, spread: 55, velocity: 48, scalar: 1.15, stagger: 500,
     gravity: 0.8, gravityBase: 0.22, dragFace: 0.930, dragEdge: 0.985,
-    tumble: 1, sway: 1, age: 9
+    tumble: 1, sway: 1, age: 9,
+    // 5 is the natural-looking rate; the multiplier is acceleration / 5.
+    acceleration: 5,
+    // 1 is off. Two or more repeats the whole set, loopGap apart.
+    loop: 1, loopGap: 700
   };
 
   // Mirrors confetti.js's own PAD aims, for the readout only. Kept as a
   // plain map because the renderer does not expose one - if that ever
   // changes, read it from there instead of keeping a second copy.
-  var PAD_AIM = { 1: 35, 2: 0, 3: -35, 4: 65, 5: 0, 6: -65, 7: 130, 8: 180, 9: -130 };
+  var PAD_AIM = {
+     1:   35,  2:    20,  3:   0,  4:  -20,  5:  -35,
+     6:  49.5,  7:   30,  8:   0,  9:  -30, 10: -49.5,
+    11:   65, 12:    54, 13:   0, 14:  -54, 15:  -65,
+    16:   98, 17: 105.5, 18: 180, 19: -105.5, 20: -98,
+    21:  130, 22:   142, 23: 180, 24: -142, 25: -130
+  };
 
   var SLIDERS = [
     ['burst', 'count', 'Pieces', 20, 400, 5, function (v) { return String(v); }],
@@ -44,6 +54,9 @@ window.confettiPlayground = (function () {
     ['burst', 'velocity', 'Launch speed', 10, 110, 1, function (v) { return v + ' px/f'; }],
     ['burst', 'spread', 'Spread', 10, 180, 5, function (v) { return v + '°'; }],
     ['burst', 'stagger', 'Stagger', 0, 1200, 25, function (v) { return v + ' ms'; }],
+    ['air', 'acceleration', 'Acceleration', 1, 10, 0.5, function (v) {
+      return (+v).toFixed(1) + '  ×' + (v / 5).toFixed(2);
+    }],
     ['air', 'gravityBase', 'Gravity', 0.05, 0.9, 0.01, function (v) { return (+v).toFixed(2); }],
     ['air', 'dragFace', 'Drag — face-on', 0.8, 1, 0.002, function (v) { return ((+v) * 100).toFixed(1) + '%'; }],
     ['air', 'dragEdge', 'Drag — edge-on', 0.8, 1, 0.002, function (v) { return ((+v) * 100).toFixed(1) + '%'; }],
@@ -59,13 +72,30 @@ window.confettiPlayground = (function () {
   };
 
   var SETS = {
-    'Four corners': [1, 3, 9, 7],
-    'Across the top': [7, 7.5, 8, 8.5, 9],
-    'Across the bottom': [1, 1.5, 2, 2.5, 3],
-    'Centre': [5]
+    'Four corners': [1, 5, 25, 21],
+    'Across the top': [21, 22, 23, 24, 25],
+    'Across the bottom': [1, 2, 3, 4, 5],
+    'Up both sides': [1, 6, 11, 16, 21, 5, 10, 15, 20, 25],
+    'Centre': [13]
   };
 
   var STORE = 'confettiPlaygroundPresets';
+
+  // The pad was a 3x3 numbered 1-9, with halves for the cells between.
+  // Every one of those positions has an exact cell on the 5x5, so a
+  // preset saved under the old scheme is moved rather than dropped:
+  // 7 -> 21, 7.5 -> 22, 8 -> 23 ... 2.5 -> 4, 3 -> 5.
+  //
+  // 3.5 and 6.5 are the exception. They stepped diagonally between rows
+  // and had no cell of their own, so they land on the end of their row.
+  function padFrom3x3(k) {
+    if (!isFinite(k)) return 13;
+    var base = Math.floor(k), half = k - base >= 0.5 ? 1 : 0;
+    base = Math.max(1, Math.min(9, base));
+    var col = Math.min(4, ((base - 1) % 3) * 2 + half);
+    var row = Math.floor((base - 1) / 3) * 2;
+    return row * 5 + col + 1;
+  }
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -88,7 +118,7 @@ window.confettiPlayground = (function () {
     var palettes = opts.palettes || PALETTES;
     // {at, dir} - dir null means "use the position's own aim", which is
     // what lets one cannon be turned without disturbing the others.
-    var cannons = [{ at: 1, dir: null }, { at: 2, dir: null }, { at: 3, dir: null }];
+    var cannons = [{ at: 1, dir: null }, { at: 3, dir: null }, { at: 5, dir: null }];
 
     host.classList.add('cbp');
     var grid = el('div', 'cbp-grid');
@@ -114,8 +144,14 @@ window.confettiPlayground = (function () {
           var call = {
             origin: c.at, count: per, spread: S.spread, velocity: S.velocity,
             gravity: S.gravity, scalar: S.scalar, age: S.age,
+            acceleration: S.acceleration,
+            loop: S.loop, loopDelay: S.loopGap,
             colors: palettes[palette]
           };
+          // Per cannon, not per press: a row of five going off in
+          // sequence should sound like five, and a loop should sound
+          // like it is still running rather than like one long silence.
+          if (refs.playSound) refs.playSound();
           // Omitted rather than sent as null, so the renderer falls back
           // to the position's own aim instead of reading null as a bearing.
           if (c.dir !== null) call.direction = c.dir;
@@ -130,6 +166,10 @@ window.confettiPlayground = (function () {
 
     function status(msg) { if (refs.status) refs.status.textContent = msg; }
 
+    // The same clamp confetti.js applies, so the readings below cannot
+    // report a rate the renderer would have refused to use.
+    function accelK() { return Math.max(1, Math.min(10, +S.acceleration || 5)) / 5; }
+
     // ── the same integrator confetti.js runs ──────────────────────────
     // Not a formula about it: a closed form would describe a model the
     // renderer no longer uses the moment either one changes.
@@ -139,7 +179,7 @@ window.confettiPlayground = (function () {
         tilt += 0.10 * S.tumble;
         var face = Math.abs(Math.cos(tilt));
         vy *= S.dragEdge + (S.dragFace - S.dragEdge) * face;
-        vy += S.gravity * S.gravityBase;
+        vy += S.gravity * S.gravityBase * accelK();
         y += vy;
         if (y < peak) peak = y;
       }
@@ -150,7 +190,7 @@ window.confettiPlayground = (function () {
       var long = simulate(900), short = simulate(60);
       var settle = Math.abs(long.vy) * 60;
       var left = Math.abs(short.vy) / S.velocity;
-      var g = S.gravity * S.gravityBase;
+      var g = S.gravity * S.gravityBase * accelK();
       var tFace = g / (1 - S.dragFace) * 60;
       var tEdge = g / (1 - S.dragEdge) * 60;
 
@@ -183,7 +223,9 @@ window.confettiPlayground = (function () {
         '  velocity: ' + S.velocity + ',\n' +
         '  gravity: ' + (+S.gravity).toFixed(2) + ',\n' +
         '  scalar: ' + (+S.scalar).toFixed(2) + ',\n' +
-        '  age: ' + (+S.age).toFixed(1) + '\n' +
+        '  acceleration: ' + (+S.acceleration).toFixed(1) + ',\n' +
+        '  age: ' + (+S.age).toFixed(1) +
+        (S.loop > 1 ? ',\n  loop: ' + S.loop + ',\n  loopDelay: ' + S.loopGap : '') + '\n' +
         '});\n\n' +
         '// confetti.js constants\n' +
         'var GRAVITY   = ' + (+S.gravityBase).toFixed(2) + ';\n' +
@@ -229,10 +271,14 @@ window.confettiPlayground = (function () {
     // Positions
     var pPos = panel('Where it fires from');
     pPos.appendChild(el('p', 'cbp-hint',
-      'Numbered like a numpad, so 1 3 7 9 are the four screen corners. Pick as ' +
-      'many as you like — they fire in the order shown.'));
+      'Numbered like a numpad, so 1 5 21 25 are the four screen corners and 13 ' +
+      'is dead centre. Pick as many as you like — they fire in the order shown.'));
     var pad = el('div', 'cbp-pad');
-    [7, 8, 9, 4, 5, 6, 1, 2, 3].forEach(function (n) {
+    [21, 22, 23, 24, 25,
+     16, 17, 18, 19, 20,
+     11, 12, 13, 14, 15,
+      6,  7,  8,  9, 10,
+      1,  2,  3,  4,  5].forEach(function (n) {
       var b = el('button', null, String(n));
       b.type = 'button';
       b.setAttribute('data-at', n);
@@ -267,13 +313,14 @@ window.confettiPlayground = (function () {
           at: Math.round(parseFloat(bits[0]) * 2) / 2,
           dir: bits.length > 1 && bits[1] !== '' ? parseFloat(bits[1]) : null
         };
-      }).filter(function (c) { return isFinite(c.at) && c.at >= 1 && c.at <= 9; });
+      }).filter(function (c) { return isFinite(c.at) && c.at >= 1 && c.at <= 25; });
       paint();
     });
     pPos.appendChild(listInput);
     pPos.appendChild(el('p', 'cbp-hint',
-      'Halves land between neighbours — 7, 7.5, 8, 8.5, 9 is five across the top. ' +
-      'Add @ and an angle to aim one: 7@90.'));
+      'The top edge is 21, 22, 23, 24, 25 — the half-steps have cells of their ' +
+      'own now, so whole numbers reach every one. Halves still land between ' +
+      'neighbours if you want a quarter-step. Add @ and an angle to aim one: 21@90.'));
 
     // Per-cannon aim
     var pAim = panel('Aim, per cannon');
@@ -292,6 +339,13 @@ window.confettiPlayground = (function () {
       cannons.forEach(function (c) {
         var row = el('div', 'cbp-aim');
         row.appendChild(el('span', 'cbp-aim-at', String(c.at)));
+        // Which way this one is pointing, as a picture. A slider reading
+        // "-105°" is a number you have to convert; an arrow is the answer.
+        // Drawn pointing up, because up is 0 on the compass the aim uses,
+        // so the rotation is the bearing with no conversion in between.
+        var arrow = el('span', 'cbp-aim-arrow');
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21V4M12 3l-6 7M12 3l6 7"/></svg>';
         var sl = document.createElement('input');
         sl.type = 'range'; sl.min = -180; sl.max = 180; sl.step = 5;
         sl.value = Math.round(aimOf(c));
@@ -301,6 +355,7 @@ window.confettiPlayground = (function () {
           var d = ((Math.round(+sl.value) % 360) + 360) % 360;
           var word = d === 0 ? ' up' : d === 180 ? ' down' : d === 90 ? ' right' : d === 270 ? ' left' : '';
           deg.textContent = sl.value + '°' + word;
+          arrow.style.transform = 'rotate(' + d + 'deg)';
         }
         label();
         sl.addEventListener('input', function () {
@@ -309,6 +364,7 @@ window.confettiPlayground = (function () {
           listInput.value = text();
           readings();
         });
+        row.appendChild(arrow);
         row.appendChild(sl);
         row.appendChild(deg);
         aims.appendChild(row);
@@ -317,11 +373,49 @@ window.confettiPlayground = (function () {
 
     // The burst
     var pBurst = panel('The burst');
-    // The air
-    var pAir = panel('The air');
+    // Physics
+    var pAir = panel('Physics');
     SLIDERS.forEach(function (s) {
       slider(s[0] === 'burst' ? pBurst : pAir, s[1], s[2], s[3], s[4], s[5], s[6]);
     });
+
+    // Loop. Ten is the ceiling and it is the renderer that enforces it,
+    // not this checkbox - a number typed into the emitted snippet gets
+    // clamped the same way. Unchecked is 1, which is "fire once", so
+    // there is no separate off state to keep in step.
+    var loopRow = el('div', 'cbp-ctl');
+    var loopLab = el('label', 'cbp-check');
+    var loopBox = document.createElement('input');
+    loopBox.type = 'checkbox';
+    loopLab.appendChild(loopBox);
+    loopLab.appendChild(el('span', null, 'Loop'));
+    var loopOut = el('output');
+    loopLab.appendChild(loopOut);
+    var loopSl = document.createElement('input');
+    loopSl.type = 'range';
+    loopSl.min = 2; loopSl.max = 10; loopSl.step = 1;
+    loopSl.setAttribute('aria-label', 'How many times to fire');
+    loopRow.appendChild(loopLab);
+    loopRow.appendChild(loopSl);
+    pBurst.appendChild(loopRow);
+
+    function syncLoop() {
+      var on = S.loop > 1;
+      loopBox.checked = on;
+      loopSl.value = on ? S.loop : 3;
+      loopSl.disabled = !on;
+      loopOut.textContent = on ? '×' + S.loop + ', ' + S.loopGap + 'ms apart' : 'fires once';
+    }
+    loopBox.addEventListener('change', function () {
+      S.loop = loopBox.checked ? Math.max(2, +loopSl.value || 3) : 1;
+      syncLoop(); paint();
+    });
+    loopSl.addEventListener('input', function () {
+      S.loop = Math.max(2, Math.min(10, +loopSl.value));
+      syncLoop(); paint();
+    });
+    refs.syncLoop = syncLoop;
+    syncLoop();
     pAir.appendChild(el('p', 'cbp-hint',
       'The gap between the two drags is the flutter: face-on the sheet floats, ' +
       'edge-on it knifes down.'));
@@ -345,39 +439,70 @@ window.confettiPlayground = (function () {
 
     // Sound, if the host asked for it
     if (opts.sound) {
+      var pSnd = panel('Sound');
       var useSound = document.createElement('input');
       useSound.type = 'checkbox';
       var check = el('label', 'cbp-check');
       check.appendChild(useSound);
       check.appendChild(el('span', null, 'Use sound'));
-      pPal.appendChild(check);
+      pSnd.appendChild(check);
 
       var picker = el('div', 'cbp-row');
-      picker.hidden = true;
       var filePick = document.createElement('input');
       filePick.type = 'file';
       filePick.accept = 'audio/*';
       picker.appendChild(filePick);
-      pPal.appendChild(picker);
+      pSnd.appendChild(picker);
 
       var soundNote = el('p', 'cbp-hint',
-        'Browsers refuse to play audio until the page has been interacted with, ' +
-        'so sound is the caller’s job, not the renderer’s.');
-      pPal.appendChild(soundNote);
+        'Plays once per cannon, so a row of five sounds like five. Browsers ' +
+        'refuse to play audio until the page has been interacted with, so ' +
+        'sound is the caller’s job, not the renderer’s.');
+      pSnd.appendChild(soundNote);
 
-      var soundUrl = opts.sound === true ? 'confetti.mp3' : opts.sound;
+      // What `sound` may be:
+      //   true            panel, playing the bundled confetti.mp3
+      //   '<url>'         panel, playing that clip by default
+      //   { clip: null }  panel with nothing bundled — the visitor brings
+      //                   a file of their own
+      //
+      // That last one is not a curiosity. The bundled clip is Pixabay
+      // Content License, not CC0, and its licence draws the line at
+      // re-hosting the raw file as an audio asset in its own right — so a
+      // public site can offer the control without serving the file. See
+      // NOTICE.md.
+      var bundled = opts.sound === true ? 'confetti.mp3'
+        : typeof opts.sound === 'string' ? opts.sound
+        : (opts.sound && 'clip' in opts.sound) ? opts.sound.clip
+        : null;
+      var soundUrl = bundled;
       var objectUrl = null;
-      useSound.addEventListener('change', function () { picker.hidden = !useSound.checked; });
+
+      function soundReady() { return !!soundUrl; }
+      function syncSound() {
+        useSound.disabled = !soundReady();
+        if (useSound.disabled) useSound.checked = false;
+        picker.hidden = false;
+      }
+      if (!bundled) {
+        soundNote.textContent =
+          'Choose an audio file and it plays once per cannon — a row of five ' +
+          'sounds like five. Nothing is uploaded: the file is read from your ' +
+          'machine and never leaves it.';
+      }
+      syncSound();
       filePick.addEventListener('change', function () {
         // Revoked before replacing: each object URL pins its blob in
         // memory until released.
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         var f = filePick.files && filePick.files[0];
         objectUrl = f ? URL.createObjectURL(f) : null;
-        soundUrl = objectUrl || (opts.sound === true ? 'confetti.mp3' : opts.sound);
+        soundUrl = objectUrl || bundled;
         soundNote.textContent = f
           ? 'Using ' + f.name + '. Nothing is uploaded — it is read from your machine.'
-          : 'Using the bundled clip.';
+          : bundled ? 'Using the bundled clip.' : 'Choose a file to hear anything.';
+        if (f) useSound.checked = true;
+        syncSound();
       });
       refs.playSound = function () {
         if (!useSound.checked) return;
@@ -457,7 +582,10 @@ window.confettiPlayground = (function () {
       var n = (nameIn.value || '').trim();
       if (!n) { preNote.textContent = 'Give it a name first.'; return; }
       var all = readStore();
-      all[n] = { S: Object.assign({}, S), cannons: cannons.slice(), palette: palette };
+      // v2 is the 5x5 pad. Unstamped saves are v1 - the 3x3 - and their
+      // positions get moved on the way back in, rather than pointing at
+      // whatever cell happens to share their old number.
+      all[n] = { v: 2, S: Object.assign({}, S), cannons: cannons.slice(), palette: palette };
       if (writeStore(all)) { nameIn.value = ''; refreshPresets(); pick.value = n; preNote.textContent = 'Saved “' + n + '”.'; }
     });
     loadB.addEventListener('click', function () {
@@ -465,10 +593,17 @@ window.confettiPlayground = (function () {
       if (!saved) return;
       Object.keys(saved.S || {}).forEach(function (k) { if (k in S) S[k] = saved.S[k]; });
       cannons = (saved.cannons || cannons).slice();
+      var moved = saved.v !== 2;
+      if (moved) {
+        cannons = cannons.map(function (c) {
+          return { at: padFrom3x3(c.at), dir: c.dir };
+        });
+      }
       palette = saved.palette || palette;
       syncSliders();
       paint();
-      preNote.textContent = 'Loaded “' + pick.value + '”.';
+      preNote.textContent = 'Loaded “' + pick.value + '”' +
+        (moved ? ' — saved on the old 3×3 pad, so its positions moved.' : '.');
     });
     delB.addEventListener('click', function () {
       var all = readStore();
@@ -495,7 +630,7 @@ window.confettiPlayground = (function () {
     var fireB = el('button', 'cbp-btn cbp-btn--go', 'Fire');
     fireB.type = 'button';
     fireB.addEventListener('click', function () {
-      if (refs.playSound) refs.playSound();
+      // fire() plays a sound per cannon; the click itself makes no noise.
       fire();
     });
     bar.appendChild(fireB);
@@ -524,6 +659,7 @@ window.confettiPlayground = (function () {
           refs['o_' + k].textContent = refs['f_' + k](S[k]);
         }
       });
+      if (refs.syncLoop) refs.syncLoop();
     }
 
     function text() {

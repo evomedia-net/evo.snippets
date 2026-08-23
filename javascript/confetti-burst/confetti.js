@@ -52,32 +52,69 @@ window.confettiBurst = (function () {
   // unreadable in a table, where the aim is the thing a person actually
   // reads. Converted once, at the entry point, so only one convention
   // ever reaches the particle loop.
+  // The pad is a 5x5, numbered like a numpad: 1 bottom-left, 5
+  // bottom-right, 21 top-left, 25 top-right, 13 dead centre.
+  //
+  //     21 22 23 24 25
+  //     16 17 18 19 20
+  //     11 12 13 14 15
+  //      6  7  8  9 10
+  //      1  2  3  4  5
+  //
+  // It was a 3x3 until the half-steps earned cells of their own. The nine
+  // positions the 3x3 had are still here - 1, 3, 5, 11, 13, 15, 21, 23, 25
+  // carry their old origins and their old hand-tuned aims unchanged, so a
+  // burst fired at a corner looks exactly as it did. The sixteen new cells
+  // aim inward with a slight upward bias, which lands within a few degrees
+  // of the tuned nine and so reads as one continuous table rather than two.
   var PAD = {
-    1: { origin: { x: -0.02, y: 1.02 }, direction: 35 },
-    2: { origin: { x: 0.50, y: 1.04 }, direction: 0 },
-    3: { origin: { x: 1.02, y: 1.02 }, direction: -35 },
-    4: { origin: { x: -0.02, y: 0.50 }, direction: 65 },
-    5: { origin: { x: 0.50, y: 0.55 }, direction: 0 },
-    6: { origin: { x: 1.02, y: 0.50 }, direction: -65 },
-    7: { origin: { x: -0.02, y: -0.02 }, direction: 130 },
-    8: { origin: { x: 0.50, y: -0.04 }, direction: 180 },
-    9: { origin: { x: 1.02, y: -0.02 }, direction: -130 }
+    21: { origin: { x: -0.02, y: -0.02 }, direction:    130 },
+    22: { origin: { x:  0.25, y: -0.02 }, direction:    142 },
+    23: { origin: { x:  0.50, y: -0.04 }, direction:    180 },
+    24: { origin: { x:  0.75, y: -0.02 }, direction:   -142 },
+    25: { origin: { x:  1.02, y: -0.02 }, direction:   -130 },
+
+    16: { origin: { x: -0.02, y:  0.24 }, direction:     98 },
+    17: { origin: { x:  0.25, y:  0.24 }, direction:  105.5 },
+    18: { origin: { x:  0.50, y:  0.24 }, direction:    180 },
+    19: { origin: { x:  0.75, y:  0.24 }, direction: -105.5 },
+    20: { origin: { x:  1.02, y:  0.24 }, direction:    -98 },
+
+    11: { origin: { x: -0.02, y:  0.50 }, direction:     65 },
+    12: { origin: { x:  0.25, y:  0.50 }, direction:     54 },
+    13: { origin: { x:  0.50, y:  0.55 }, direction:      0 },
+    14: { origin: { x:  0.75, y:  0.50 }, direction:    -54 },
+    15: { origin: { x:  1.02, y:  0.50 }, direction:    -65 },
+
+     6: { origin: { x: -0.02, y:  0.76 }, direction:   49.5 },
+     7: { origin: { x:  0.25, y:  0.76 }, direction:     30 },
+     8: { origin: { x:  0.50, y:  0.76 }, direction:      0 },
+     9: { origin: { x:  0.75, y:  0.76 }, direction:    -30 },
+    10: { origin: { x:  1.02, y:  0.76 }, direction:  -49.5 },
+
+     1: { origin: { x: -0.02, y:  1.02 }, direction:     35 },
+     2: { origin: { x:  0.25, y:  1.02 }, direction:     20 },
+     3: { origin: { x:  0.50, y:  1.04 }, direction:      0 },
+     4: { origin: { x:  0.75, y:  1.02 }, direction:    -20 },
+     5: { origin: { x:  1.02, y:  1.02 }, direction:    -35 }
   };
 
   function toCanvasAngle(direction) { return direction - 90; }
 
-  // Fractions slide between neighbouring keys, so a row of cannons can be
-  // written 7, 7.5, 8, 8.5, 9 — five evenly spaced across the top edge —
-  // without inventing a second coordinate system for the in-between ones.
-  // The aim is interpolated too, so a cannon halfway along an edge leans
-  // halfway between its neighbours' aims.
+  // Fractions slide between neighbouring keys. The 5x5 already has a cell
+  // for every half-step the old 3x3 needed one for, so fractions are now a
+  // quarter-step rather than the only way to reach the middle of an edge —
+  // 21, 22, 23, 24, 25 is the top edge, spelled with whole numbers.
   //
-  // Consecutive keys are adjacent WITHIN a row (7-8-9, 4-5-6, 1-2-3), so
-  // those fractions land where you would point. 3.5 and 6.5 are the two
-  // that step between rows, and they slide diagonally across the middle
-  // of the screen — defined, and rarely what anyone wants.
+  // Consecutive keys are adjacent WITHIN a row, so those fractions land
+  // where you would point. The four that step between rows (5.5, 10.5,
+  // 15.5, 20.5) slide diagonally across the screen — defined, and rarely
+  // what anyone wants.
+  //
+  // The aim is interpolated too, so a cannon between two cells leans
+  // halfway between their aims.
   function padAt(n) {
-    n = Math.max(1, Math.min(9, n));
+    n = Math.max(1, Math.min(25, n));
     var lo = Math.floor(n), hi = Math.ceil(n), k = n - lo;
     var a = PAD[lo];
     if (k === 0) return a;
@@ -211,6 +248,20 @@ window.confettiBurst = (function () {
   return function fire(opts) {
     opts = opts || {};
 
+    // Fire the same burst again, up to ten times. Clamped rather than
+    // trusted: a runaway loop on the page you are tuning is a browser you
+    // have to kill, and ten is already more than a celebration needs.
+    // The repeats drop `loop` so they cannot schedule loops of their own.
+    var loops = Math.max(1, Math.min(10, Math.round(+opts.loop || 1)));
+    if (loops > 1) {
+      var again = Object.assign({}, opts);
+      delete again.loop;
+      var gap = Math.max(60, +opts.loopDelay || 700);
+      for (var L = 1; L < loops; L++) {
+        setTimeout(fire.bind(null, again), gap * L);
+      }
+    }
+
     // `origin: 7` is shorthand for a pad position, and 7.5 for halfway to
     // the next one. Resolved BEFORE the defaults are applied, so the pad's
     // own aim can be told apart from an angle the caller actually asked
@@ -218,7 +269,7 @@ window.confettiBurst = (function () {
     var pad = null;
     if (typeof opts.origin === 'number') {
       if (!isFinite(opts.origin)) {
-        throw new Error('confettiBurst: origin must be 1-9 (numpad) or {x, y}');
+        throw new Error('confettiBurst: origin must be 1-25 (numpad) or {x, y}');
       }
       pad = padAt(opts.origin);
     }
@@ -228,6 +279,16 @@ window.confettiBurst = (function () {
       // multiplier between the preset and the pixels it moves.
       count: 140, spread: 70, velocity: 34, gravity: 1, drift: 0, scalar: 1,
       roundRatio: 0,
+      // How fast the launch speed bleeds off, and so how high the burst
+      // peaks, on a 1-10 scale where 5 is the natural-looking rate: the
+      // multiplier is acceleration / 5, which puts 2.5 at half and 7.5 at
+      // half again as much. It scales `gravity` rather than replacing it —
+      // gravity is the raw constant, this is the dial you reach for.
+      //
+      // 1 is the floor rather than 0 because 0 is not a slow burst, it is
+      // no fall at all: the pieces coast off the top of the screen and the
+      // effect stops being confetti.
+      acceleration: 5,
       // Seconds, because that is what anyone tuning it is thinking in.
       // Most pieces leave the bottom of the screen well before this, so
       // it mainly governs the ones that drift.
@@ -284,6 +345,9 @@ window.confettiBurst = (function () {
     var swayK = tuned('sway', 1);
     var ox = o.origin.x * window.innerWidth;
     var oy = o.origin.y * window.innerHeight;
+    // Folded into the per-particle gravity, so a second burst at a
+    // different acceleration does not retune the one already in flight.
+    var accelK = Math.max(1, Math.min(10, +o.acceleration || 5)) / 5;
 
     for (var i = 0; i < o.count; i++) {
       var ang = (o.angle + (Math.random() - 0.5) * o.spread) * Math.PI / 180;
@@ -314,7 +378,7 @@ window.confettiBurst = (function () {
         round: Math.random() < o.roundRatio,
         // Held per particle, not read from a shared config, so a second
         // burst with different physics does not rewrite the first one.
-        gravity: o.gravity,
+        gravity: o.gravity * accelK,
         drift: o.drift,
         life: 1, still: still, fade: 0, decay: decay
       };
