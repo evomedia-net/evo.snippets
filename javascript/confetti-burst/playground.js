@@ -30,13 +30,23 @@ window.confettiPlayground = (function () {
   var DEFAULTS = {
     count: 165, spread: 55, velocity: 48, scalar: 1.15, stagger: 500,
     gravity: 0.8, gravityBase: 0.22, dragFace: 0.930, dragEdge: 0.985,
-    tumble: 1, sway: 1, age: 9
+    tumble: 1, sway: 1, age: 9,
+    // 5 is the natural-looking rate; the multiplier is acceleration / 5.
+    acceleration: 5,
+    // 1 is off. Two or more repeats the whole set, loopGap apart.
+    loop: 1, loopGap: 700
   };
 
   // Mirrors confetti.js's own PAD aims, for the readout only. Kept as a
   // plain map because the renderer does not expose one - if that ever
   // changes, read it from there instead of keeping a second copy.
-  var PAD_AIM = { 1: 35, 2: 0, 3: -35, 4: 65, 5: 0, 6: -65, 7: 130, 8: 180, 9: -130 };
+  var PAD_AIM = {
+     1:  130,  2:   142,  3: 180,  4:   -142,  5: -130,
+     6:   98,  7: 105.5,  8: 180,  9: -105.5, 10:  -98,
+    11:   65, 12:    54, 13:   0, 14:    -54, 15:  -65,
+    16: 49.5, 17:    30, 18:   0, 19:    -30, 20: -49.5,
+    21:   35, 22:    20, 23:   0, 24:    -20, 25:  -35
+  };
 
   var SLIDERS = [
     ['burst', 'count', 'Pieces', 20, 400, 5, function (v) { return String(v); }],
@@ -44,6 +54,9 @@ window.confettiPlayground = (function () {
     ['burst', 'velocity', 'Launch speed', 10, 110, 1, function (v) { return v + ' px/f'; }],
     ['burst', 'spread', 'Spread', 10, 180, 5, function (v) { return v + '°'; }],
     ['burst', 'stagger', 'Stagger', 0, 1200, 25, function (v) { return v + ' ms'; }],
+    ['air', 'acceleration', 'Acceleration', 1, 10, 0.5, function (v) {
+      return (+v).toFixed(1) + '  ×' + (v / 5).toFixed(2);
+    }],
     ['air', 'gravityBase', 'Gravity', 0.05, 0.9, 0.01, function (v) { return (+v).toFixed(2); }],
     ['air', 'dragFace', 'Drag — face-on', 0.8, 1, 0.002, function (v) { return ((+v) * 100).toFixed(1) + '%'; }],
     ['air', 'dragEdge', 'Drag — edge-on', 0.8, 1, 0.002, function (v) { return ((+v) * 100).toFixed(1) + '%'; }],
@@ -59,13 +72,116 @@ window.confettiPlayground = (function () {
   };
 
   var SETS = {
-    'Four corners': [1, 3, 9, 7],
-    'Across the top': [7, 7.5, 8, 8.5, 9],
-    'Across the bottom': [1, 1.5, 2, 2.5, 3],
-    'Centre': [5]
+    'Four corners': [21, 25, 5, 1],
+    'Across the top': [1, 2, 3, 4, 5],
+    'Across the bottom': [21, 22, 23, 24, 25],
+    'Up both sides': [21, 16, 11, 6, 1, 25, 20, 15, 10, 5],
+    'Centre': [13]
   };
 
   var STORE = 'confettiPlaygroundPresets';
+
+  // Palettes the panel writes rather than reads. A preset naming one of
+  // these has to carry its colours; a preset naming a host palette should
+  // not, or it would pin an old copy of a palette the host has since
+  // changed.
+  var OWNED = { Random: 1, Custom: 1 };
+
+  // Saved setups carry the numbering they were written in, so each old
+  // scheme gets a way back to the current one. Positions are moved rather
+  // than dropped - every one of them has an exact cell here.
+  //
+  // v1: the 3x3 numbered 1-9 in calculator order, halves for the cells
+  //     between. 7 -> 1, 7.5 -> 2, 8 -> 3 ... 2.5 -> 24, 3 -> 25.
+  //     3.5 and 6.5 are the exception: they stepped diagonally between
+  //     rows and had no cell of their own, so they land on the end of
+  //     their row.
+  // v2: the 5x5 in calculator order, 21 22 23 24 25 across the top. A
+  //     vertical flip. It never shipped, but it did run on a review
+  //     server, and a preset that quietly points at the mirror image of
+  //     where it was written is worse than one that refuses to load.
+  function padFromV1(k) {
+    if (!isFinite(k)) return 13;
+    var base = Math.floor(k), half = k - base >= 0.5 ? 1 : 0;
+    base = Math.max(1, Math.min(9, base));
+    var col = Math.min(4, ((base - 1) % 3) * 2 + half);
+    var rowFromTop = 2 - Math.floor((base - 1) / 3);
+    return rowFromTop * 2 * 5 + col + 1;
+  }
+
+  function padFromV2(k) {
+    if (!isFinite(k)) return 13;
+    var i = Math.max(1, Math.min(25, Math.round(k))) - 1;
+    return (4 - Math.floor(i / 5)) * 5 + (i % 5) + 1;
+  }
+
+  // Six hues at ONE lightness, spaced around the wheel with a little
+  // jitter so the set reads as chosen rather than as six random colours.
+  // The single lightness is the part that matters: mix light and dark and
+  // the light pieces read as gaps in the burst rather than as colours.
+  function randomPalette() {
+    var start = Math.random() * 360;
+    var light = 49 + Math.random() * 7;
+    var sat = 62 + Math.random() * 16;
+    var out = [];
+    for (var i = 0; i < 6; i++) {
+      out.push(hslHex((start + i * 60 + (Math.random() - 0.5) * 26 + 360) % 360, sat, light));
+    }
+    return out;
+  }
+
+  function rgbOf(hex) {
+    var n = parseInt(String(hex).replace('#', ''), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function hexOf(rgb) {
+    return '#' + rgb.map(function (v) {
+      var h = Math.max(0, Math.min(255, Math.round(v))).toString(16);
+      return h.length < 2 ? '0' + h : h;
+    }).join('');
+  }
+
+  function relLum(rgb) {
+    var c = rgb.map(function (v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function contrast(a, b) {
+    var l1 = relLum(a), l2 = relLum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  }
+
+  // Label colour for a swatch: the INVERSE, so #ffffff reads as #000000.
+  //
+  // An inverse only works at the ends of the range though. #808080
+  // inverts to #7f7f7f - a contrast ratio of 1.0, which is text you
+  // cannot see at all, and the middle of the range is exactly where a
+  // colour picker leaves you. So where the inverse does not clear 4.5:1
+  // the label falls back to whichever of black or white does. Every
+  // colour Kelly named behaves as asked; the unreadable ones are the only
+  // ones that differ, and they were never readable.
+  function labelOn(hex) {
+    var bg = rgbOf(hex);
+    var inv = [255 - bg[0], 255 - bg[1], 255 - bg[2]];
+    if (contrast(inv, bg) >= 4.5) return hexOf(inv);
+    return relLum(bg) > 0.18 ? '#000000' : '#ffffff';
+  }
+
+  function hslHex(h, s, l) {
+    s /= 100; l /= 100;
+    var a = s * Math.min(l, 1 - l);
+    function chan(n) {
+      var k = (n + h / 30) % 12;
+      var v = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+      var hx = Math.round(255 * v).toString(16);
+      return hx.length < 2 ? '0' + hx : hx;
+    }
+    return '#' + chan(0) + chan(8) + chan(4);
+  }
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -85,10 +201,13 @@ window.confettiPlayground = (function () {
     var opts = options || {};
     var S = Object.assign({}, DEFAULTS, opts.defaults || {});
     var palette = opts.palette || 'Brand';
-    var palettes = opts.palettes || PALETTES;
+    var palettes = Object.assign({}, opts.palettes || PALETTES);
     // {at, dir} - dir null means "use the position's own aim", which is
     // what lets one cannon be turned without disturbing the others.
-    var cannons = [{ at: 1, dir: null }, { at: 2, dir: null }, { at: 3, dir: null }];
+    // The bottom row - 21, 23, 25 - which is where 1, 3, 5 pointed before
+    // the pad was flipped to phone order. Confetti rising from below the
+    // bottom edge is the shape the panel should open on.
+    var cannons = [{ at: 21, dir: null }, { at: 23, dir: null }, { at: 25, dir: null }];
 
     host.classList.add('cbp');
     var grid = el('div', 'cbp-grid');
@@ -114,8 +233,14 @@ window.confettiPlayground = (function () {
           var call = {
             origin: c.at, count: per, spread: S.spread, velocity: S.velocity,
             gravity: S.gravity, scalar: S.scalar, age: S.age,
+            acceleration: S.acceleration,
+            loop: S.loop, loopDelay: S.loopGap,
             colors: palettes[palette]
           };
+          // Per cannon, not per press: a row of five going off in
+          // sequence should sound like five, and a loop should sound
+          // like it is still running rather than like one long silence.
+          if (refs.playSound) refs.playSound();
           // Omitted rather than sent as null, so the renderer falls back
           // to the position's own aim instead of reading null as a bearing.
           if (c.dir !== null) call.direction = c.dir;
@@ -130,6 +255,10 @@ window.confettiPlayground = (function () {
 
     function status(msg) { if (refs.status) refs.status.textContent = msg; }
 
+    // The same clamp confetti.js applies, so the readings below cannot
+    // report a rate the renderer would have refused to use.
+    function accelK() { return Math.max(1, Math.min(10, +S.acceleration || 5)) / 5; }
+
     // ── the same integrator confetti.js runs ──────────────────────────
     // Not a formula about it: a closed form would describe a model the
     // renderer no longer uses the moment either one changes.
@@ -139,7 +268,7 @@ window.confettiPlayground = (function () {
         tilt += 0.10 * S.tumble;
         var face = Math.abs(Math.cos(tilt));
         vy *= S.dragEdge + (S.dragFace - S.dragEdge) * face;
-        vy += S.gravity * S.gravityBase;
+        vy += S.gravity * S.gravityBase * accelK();
         y += vy;
         if (y < peak) peak = y;
       }
@@ -150,7 +279,7 @@ window.confettiPlayground = (function () {
       var long = simulate(900), short = simulate(60);
       var settle = Math.abs(long.vy) * 60;
       var left = Math.abs(short.vy) / S.velocity;
-      var g = S.gravity * S.gravityBase;
+      var g = S.gravity * S.gravityBase * accelK();
       var tFace = g / (1 - S.dragFace) * 60;
       var tEdge = g / (1 - S.dragEdge) * 60;
 
@@ -183,7 +312,9 @@ window.confettiPlayground = (function () {
         '  velocity: ' + S.velocity + ',\n' +
         '  gravity: ' + (+S.gravity).toFixed(2) + ',\n' +
         '  scalar: ' + (+S.scalar).toFixed(2) + ',\n' +
-        '  age: ' + (+S.age).toFixed(1) + '\n' +
+        '  acceleration: ' + (+S.acceleration).toFixed(1) + ',\n' +
+        '  age: ' + (+S.age).toFixed(1) +
+        (S.loop > 1 ? ',\n  loop: ' + S.loop + ',\n  loopDelay: ' + S.loopGap : '') + '\n' +
         '});\n\n' +
         '// confetti.js constants\n' +
         'var GRAVITY   = ' + (+S.gravityBase).toFixed(2) + ';\n' +
@@ -229,10 +360,15 @@ window.confettiPlayground = (function () {
     // Positions
     var pPos = panel('Where it fires from');
     pPos.appendChild(el('p', 'cbp-hint',
-      'Numbered like a numpad, so 1 3 7 9 are the four screen corners. Pick as ' +
-      'many as you like — they fire in the order shown.'));
+      'Numbered like a phone keypad — 1 2 3 across the top — so 1 and 5 are the ' +
+      'top corners, 21 and 25 the bottom ones, and 13 is dead centre. Pick as ' +
+      'many as you like; they fire in the order shown.'));
     var pad = el('div', 'cbp-pad');
-    [7, 8, 9, 4, 5, 6, 1, 2, 3].forEach(function (n) {
+    [ 1,  2,  3,  4,  5,
+      6,  7,  8,  9, 10,
+     11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20,
+     21, 22, 23, 24, 25].forEach(function (n) {
       var b = el('button', null, String(n));
       b.type = 'button';
       b.setAttribute('data-at', n);
@@ -264,16 +400,18 @@ window.confettiPlayground = (function () {
       cannons = listInput.value.split(/[,\s]+/).filter(Boolean).map(function (raw) {
         var bits = String(raw).split('@');
         return {
-          at: Math.round(parseFloat(bits[0]) * 2) / 2,
+          at: Math.round(parseFloat(bits[0]) * 100) / 100,
           dir: bits.length > 1 && bits[1] !== '' ? parseFloat(bits[1]) : null
         };
-      }).filter(function (c) { return isFinite(c.at) && c.at >= 1 && c.at <= 9; });
+      }).filter(function (c) { return isFinite(c.at) && c.at >= 1 && c.at <= 25; });
       paint();
     });
     pPos.appendChild(listInput);
     pPos.appendChild(el('p', 'cbp-hint',
-      'Halves land between neighbours — 7, 7.5, 8, 8.5, 9 is five across the top. ' +
-      'Add @ and an angle to aim one: 7@90.'));
+      'The top edge is 1, 2, 3, 4, 5 — the half-steps have cells of their own ' +
+      'now, so whole numbers reach every one. Any fraction still lands between ' +
+      'neighbours: 4.1 is a tenth of the way from 4 to 5. Add @ and an angle to ' +
+      'aim one: 1@90.'));
 
     // Per-cannon aim
     var pAim = panel('Aim, per cannon');
@@ -292,6 +430,13 @@ window.confettiPlayground = (function () {
       cannons.forEach(function (c) {
         var row = el('div', 'cbp-aim');
         row.appendChild(el('span', 'cbp-aim-at', String(c.at)));
+        // Which way this one is pointing, as a picture. A slider reading
+        // "-105°" is a number you have to convert; an arrow is the answer.
+        // Drawn pointing up, because up is 0 on the compass the aim uses,
+        // so the rotation is the bearing with no conversion in between.
+        var arrow = el('span', 'cbp-aim-arrow');
+        arrow.setAttribute('aria-hidden', 'true');
+        arrow.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21V4M12 3l-6 7M12 3l6 7"/></svg>';
         var sl = document.createElement('input');
         sl.type = 'range'; sl.min = -180; sl.max = 180; sl.step = 5;
         sl.value = Math.round(aimOf(c));
@@ -301,6 +446,7 @@ window.confettiPlayground = (function () {
           var d = ((Math.round(+sl.value) % 360) + 360) % 360;
           var word = d === 0 ? ' up' : d === 180 ? ' down' : d === 90 ? ' right' : d === 270 ? ' left' : '';
           deg.textContent = sl.value + '°' + word;
+          arrow.style.transform = 'rotate(' + d + 'deg)';
         }
         label();
         sl.addEventListener('input', function () {
@@ -309,6 +455,7 @@ window.confettiPlayground = (function () {
           listInput.value = text();
           readings();
         });
+        row.appendChild(arrow);
         row.appendChild(sl);
         row.appendChild(deg);
         aims.appendChild(row);
@@ -317,67 +464,211 @@ window.confettiPlayground = (function () {
 
     // The burst
     var pBurst = panel('The burst');
-    // The air
-    var pAir = panel('The air');
+    // Physics
+    var pAir = panel('Physics');
     SLIDERS.forEach(function (s) {
       slider(s[0] === 'burst' ? pBurst : pAir, s[1], s[2], s[3], s[4], s[5], s[6]);
     });
+
+    // Loop. Ten is the ceiling and it is the renderer that enforces it,
+    // not this checkbox - a number typed into the emitted snippet gets
+    // clamped the same way. Unchecked is 1, which is "fire once", so
+    // there is no separate off state to keep in step.
+    var loopRow = el('div', 'cbp-ctl');
+    var loopLab = el('label', 'cbp-check');
+    var loopBox = document.createElement('input');
+    loopBox.type = 'checkbox';
+    loopLab.appendChild(loopBox);
+    loopLab.appendChild(el('span', null, 'Loop'));
+    var loopOut = el('output');
+    loopLab.appendChild(loopOut);
+    var loopSl = document.createElement('input');
+    loopSl.type = 'range';
+    loopSl.min = 2; loopSl.max = 10; loopSl.step = 1;
+    loopSl.setAttribute('aria-label', 'How many times to fire');
+    loopRow.appendChild(loopLab);
+    loopRow.appendChild(loopSl);
+    pBurst.appendChild(loopRow);
+
+    function syncLoop() {
+      var on = S.loop > 1;
+      loopBox.checked = on;
+      loopSl.value = on ? S.loop : 3;
+      loopSl.disabled = !on;
+      loopOut.textContent = on ? '×' + S.loop + ', ' + S.loopGap + 'ms apart' : 'fires once';
+    }
+    loopBox.addEventListener('change', function () {
+      S.loop = loopBox.checked ? Math.max(2, +loopSl.value || 3) : 1;
+      syncLoop(); paint();
+    });
+    loopSl.addEventListener('input', function () {
+      S.loop = Math.max(2, Math.min(10, +loopSl.value));
+      syncLoop(); paint();
+    });
+    refs.syncLoop = syncLoop;
+    syncLoop();
     pAir.appendChild(el('p', 'cbp-hint',
       'The gap between the two drags is the flutter: face-on the sheet floats, ' +
       'edge-on it knifes down.'));
 
     // Palette
     var pPal = panel('Colour');
+    palettes.Random = randomPalette();
+    // Seeded from whatever palette the host opened on, so the six pickers
+    // start somewhere deliberate rather than on six identical blacks.
+    palettes.Custom = (palettes[palette] || []).slice(0, 6);
+    while (palettes.Custom.length < 6) palettes.Custom.push('#2563eb');
     var palRow = el('div', 'cbp-row');
+    var swatches = el('div', 'cbp-swatches');
+
+    function selectPalette(name) {
+      palette = name;
+      [].forEach.call(palRow.children, function (o) {
+        o.setAttribute('aria-pressed', String(o.textContent === name));
+      });
+      paintSwatches();
+    }
+
+    function paintSwatches() {
+      swatches.innerHTML = '';
+      (palettes[palette] || []).forEach(function (c) {
+        var sw = el('span', 'cbp-swatch');
+        sw.style.background = c;
+        sw.title = c;
+        swatches.appendChild(sw);
+      });
+    }
+
     Object.keys(palettes).forEach(function (name) {
       var b = el('button', 'cbp-btn cbp-btn--sm', name);
       b.type = 'button';
       b.setAttribute('aria-pressed', String(name === palette));
       b.addEventListener('click', function () {
-        palette = name;
-        [].forEach.call(palRow.children, function (o) {
-          o.setAttribute('aria-pressed', String(o.textContent === name));
-        });
+        // Random re-rolls every press, so it is a "give me another" rather
+        // than one more fixed palette you can only pick once.
+        if (name === 'Random') palettes.Random = randomPalette();
+        selectPalette(name);
       });
       palRow.appendChild(b);
     });
     pPal.appendChild(palRow);
+    pPal.appendChild(swatches);
+    paintSwatches();
+    pPal.appendChild(el('p', 'cbp-hint',
+      'Random re-rolls each time you press it. Six hues at one lightness — a ' +
+      'much lighter piece reads as a gap in the burst rather than as a colour.'));
+
+    // Six colours of your own. Each opens the OS colour picker, wears the
+    // colour it holds and prints its hex, so the grid is both the control
+    // and the readout - there is nothing else to look at to know what you
+    // chose. Editing any of them selects Custom, because changing a colour
+    // and then having to remember to press a button for it to count is a
+    // step that exists only to be forgotten.
+    var customGrid = el('div', 'cbp-colours');
+    palettes.Custom.forEach(function (hex, i) {
+      var cell = el('label', 'cbp-colour');
+      var inp = document.createElement('input');
+      inp.type = 'color';
+      inp.value = hex;
+      inp.setAttribute('aria-label', 'Custom colour ' + (i + 1));
+      var face = el('span', 'cbp-colour-face');
+
+      function wear(v) {
+        cell.style.background = v;
+        face.textContent = v.toUpperCase();
+        face.style.color = labelOn(v);
+      }
+      wear(hex);
+
+      inp.addEventListener('input', function () {
+        palettes.Custom[i] = inp.value;
+        wear(inp.value);
+        selectPalette('Custom');
+      });
+      cell.appendChild(inp);
+      cell.appendChild(face);
+      customGrid.appendChild(cell);
+    });
+    pPal.appendChild(customGrid);
+    refs.customGrid = customGrid;
+    refs.repaintCustom = function () {
+      [].forEach.call(customGrid.children, function (cell, i) {
+        var v = palettes.Custom[i];
+        if (!v) return;
+        cell.querySelector('input').value = v;
+        cell.style.background = v;
+        var f = cell.querySelector('.cbp-colour-face');
+        f.textContent = v.toUpperCase();
+        f.style.color = labelOn(v);
+      });
+    };
 
     // Sound, if the host asked for it
     if (opts.sound) {
+      var pSnd = panel('Sound');
       var useSound = document.createElement('input');
       useSound.type = 'checkbox';
       var check = el('label', 'cbp-check');
       check.appendChild(useSound);
       check.appendChild(el('span', null, 'Use sound'));
-      pPal.appendChild(check);
+      pSnd.appendChild(check);
 
       var picker = el('div', 'cbp-row');
-      picker.hidden = true;
       var filePick = document.createElement('input');
       filePick.type = 'file';
       filePick.accept = 'audio/*';
       picker.appendChild(filePick);
-      pPal.appendChild(picker);
+      pSnd.appendChild(picker);
 
       var soundNote = el('p', 'cbp-hint',
-        'Browsers refuse to play audio until the page has been interacted with, ' +
-        'so sound is the caller’s job, not the renderer’s.');
-      pPal.appendChild(soundNote);
+        'Plays once per cannon, so a row of five sounds like five. Browsers ' +
+        'refuse to play audio until the page has been interacted with, so ' +
+        'sound is the caller’s job, not the renderer’s.');
+      pSnd.appendChild(soundNote);
 
-      var soundUrl = opts.sound === true ? 'confetti.mp3' : opts.sound;
+      // What `sound` may be:
+      //   true            panel, playing the bundled confetti.mp3
+      //   '<url>'         panel, playing that clip by default
+      //   { clip: null }  panel with nothing bundled — the visitor brings
+      //                   a file of their own
+      //
+      // That last one is not a curiosity. The bundled clip is Pixabay
+      // Content License, not CC0, and its licence draws the line at
+      // re-hosting the raw file as an audio asset in its own right — so a
+      // public site can offer the control without serving the file. See
+      // NOTICE.md.
+      var bundled = opts.sound === true ? 'confetti.mp3'
+        : typeof opts.sound === 'string' ? opts.sound
+        : (opts.sound && 'clip' in opts.sound) ? opts.sound.clip
+        : null;
+      var soundUrl = bundled;
       var objectUrl = null;
-      useSound.addEventListener('change', function () { picker.hidden = !useSound.checked; });
+
+      function soundReady() { return !!soundUrl; }
+      function syncSound() {
+        useSound.disabled = !soundReady();
+        if (useSound.disabled) useSound.checked = false;
+        picker.hidden = false;
+      }
+      if (!bundled) {
+        soundNote.textContent =
+          'Choose an audio file and it plays once per cannon — a row of five ' +
+          'sounds like five. Nothing is uploaded: the file is read from your ' +
+          'machine and never leaves it.';
+      }
+      syncSound();
       filePick.addEventListener('change', function () {
         // Revoked before replacing: each object URL pins its blob in
         // memory until released.
         if (objectUrl) URL.revokeObjectURL(objectUrl);
         var f = filePick.files && filePick.files[0];
         objectUrl = f ? URL.createObjectURL(f) : null;
-        soundUrl = objectUrl || (opts.sound === true ? 'confetti.mp3' : opts.sound);
+        soundUrl = objectUrl || bundled;
         soundNote.textContent = f
           ? 'Using ' + f.name + '. Nothing is uploaded — it is read from your machine.'
-          : 'Using the bundled clip.';
+          : bundled ? 'Using the bundled clip.' : 'Choose a file to hear anything.';
+        if (f) useSound.checked = true;
+        syncSound();
       });
       refs.playSound = function () {
         if (!useSound.checked) return;
@@ -457,7 +748,17 @@ window.confettiPlayground = (function () {
       var n = (nameIn.value || '').trim();
       if (!n) { preNote.textContent = 'Give it a name first.'; return; }
       var all = readStore();
-      all[n] = { S: Object.assign({}, S), cannons: cannons.slice(), palette: palette };
+      // v3 is the 5x5 in phone-keypad order. Unstamped saves are v1 (the
+      // 3x3); v2 is the same 5x5 upside down. Either way the positions get
+      // moved on the way back in, rather than pointing at whatever cell
+      // happens to share their old number.
+      all[n] = {
+        v: 3, S: Object.assign({}, S), cannons: cannons.slice(), palette: palette,
+        // Random re-rolls on every press and Custom is edited in place,
+        // so for those two the name alone would load a different set of
+        // colours than the one that was saved.
+        colors: OWNED[palette] ? (palettes[palette] || []).slice() : null
+      };
       if (writeStore(all)) { nameIn.value = ''; refreshPresets(); pick.value = n; preNote.textContent = 'Saved “' + n + '”.'; }
     });
     loadB.addEventListener('click', function () {
@@ -465,10 +766,25 @@ window.confettiPlayground = (function () {
       if (!saved) return;
       Object.keys(saved.S || {}).forEach(function (k) { if (k in S) S[k] = saved.S[k]; });
       cannons = (saved.cannons || cannons).slice();
-      palette = saved.palette || palette;
+      var from = saved.v === 3 ? null : saved.v === 2 ? padFromV2 : padFromV1;
+      if (from) {
+        cannons = cannons.map(function (c) {
+          return { at: from(c.at), dir: c.dir };
+        });
+      }
+      var name = saved.palette || palette;
+      if (OWNED[name] && saved.colors && saved.colors.length) {
+        palettes[name] = saved.colors.slice();
+        if (name === 'Custom' && refs.repaintCustom) refs.repaintCustom();
+      }
+      selectPalette(name);
       syncSliders();
       paint();
-      preNote.textContent = 'Loaded “' + pick.value + '”.';
+      preNote.textContent = 'Loaded “' + pick.value + '”' + (
+        !from ? '.'
+          : saved.v === 2
+            ? ' — saved before the pad was flipped to phone order, so its positions moved.'
+            : ' — saved on the old 3×3 pad, so its positions moved.');
     });
     delB.addEventListener('click', function () {
       var all = readStore();
@@ -495,7 +811,7 @@ window.confettiPlayground = (function () {
     var fireB = el('button', 'cbp-btn cbp-btn--go', 'Fire');
     fireB.type = 'button';
     fireB.addEventListener('click', function () {
-      if (refs.playSound) refs.playSound();
+      // fire() plays a sound per cannon; the click itself makes no noise.
       fire();
     });
     bar.appendChild(fireB);
@@ -524,6 +840,7 @@ window.confettiPlayground = (function () {
           refs['o_' + k].textContent = refs['f_' + k](S[k]);
         }
       });
+      if (refs.syncLoop) refs.syncLoop();
     }
 
     function text() {
