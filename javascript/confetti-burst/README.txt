@@ -72,6 +72,25 @@ decides how many and how far apart:
       setTimeout(function () { confettiBurst({ origin: at, count: 60 }); }, i * 220);
     });
 
+Sound
+-----
+
+The renderer has no audio, on purpose. Browsers refuse to play sound
+until the page has been interacted with, and only the caller knows whether
+that has happened - a burst fired by a server push on a page nobody has
+touched throws NotAllowedError every time. So sound is the caller's job:
+
+    document.getElementById('celebrate').addEventListener('click', function () {
+      new Audio('confetti.mp3').play();   // inside the gesture, so it is allowed
+      confettiBurst({ origin: 5 });
+    });
+
+demo.html has a Use sound checkbox and a file picker, so you can try it
+with the bundled clip or any audio file on your machine - nothing is uploaded.
+
+confetti.mp3 is third-party content and not covered by this repository's
+MIT licence. See NOTICE.md (NOTICE.md) before shipping it anywhere.
+
 Options
 -------
 
