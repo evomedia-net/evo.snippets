@@ -109,8 +109,24 @@ The palette row carries a **Random** button that re-rolls on every press:
 six hues spaced round the wheel at one lightness, because mixing light and
 dark makes the light pieces read as gaps in the burst rather than as
 colours. Swatches under the row show whichever palette is in hand, so you
-can see what you rolled without firing. A saved setup on Random keeps the
-exact colours it was saved with.
+can see what you rolled without firing.
+
+Below it, a 3 × 2 grid of **your own six colours**. Each cell opens the
+OS colour picker, then wears the colour it holds and prints its hex — the
+control and the readout are the same object, so there is nothing else to
+look at to know what you chose. Editing any of them selects **Custom**.
+
+The hex is printed in the *inverse* of the cell's colour, so `#ffffff`
+reads as `#000000`. An inverse only works at the ends of the range,
+though: `#808080` inverts to `#7f7f7f`, a contrast ratio of 1.0, and the
+middle of the range is exactly where a colour picker leaves you. Where the
+inverse does not clear 4.5:1 the label falls back to whichever of black or
+white does.
+
+Random and Custom are the two palettes the panel rewrites rather than
+reads, so a saved setup on either keeps the exact colours it was saved
+with. A setup on one of the host's own palettes keeps only the name, and
+so follows the host if those colours later change.
 
 The panel is a component, not page markup:
 

@@ -81,6 +81,12 @@ window.confettiPlayground = (function () {
 
   var STORE = 'confettiPlaygroundPresets';
 
+  // Palettes the panel writes rather than reads. A preset naming one of
+  // these has to carry its colours; a preset naming a host palette should
+  // not, or it would pin an old copy of a palette the host has since
+  // changed.
+  var OWNED = { Random: 1, Custom: 1 };
+
   // Saved setups carry the numbering they were written in, so each old
   // scheme gets a way back to the current one. Positions are moved rather
   // than dropped - every one of them has an exact cell here.
@@ -122,6 +128,47 @@ window.confettiPlayground = (function () {
       out.push(hslHex((start + i * 60 + (Math.random() - 0.5) * 26 + 360) % 360, sat, light));
     }
     return out;
+  }
+
+  function rgbOf(hex) {
+    var n = parseInt(String(hex).replace('#', ''), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  function hexOf(rgb) {
+    return '#' + rgb.map(function (v) {
+      var h = Math.max(0, Math.min(255, Math.round(v))).toString(16);
+      return h.length < 2 ? '0' + h : h;
+    }).join('');
+  }
+
+  function relLum(rgb) {
+    var c = rgb.map(function (v) {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+
+  function contrast(a, b) {
+    var l1 = relLum(a), l2 = relLum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  }
+
+  // Label colour for a swatch: the INVERSE, so #ffffff reads as #000000.
+  //
+  // An inverse only works at the ends of the range though. #808080
+  // inverts to #7f7f7f - a contrast ratio of 1.0, which is text you
+  // cannot see at all, and the middle of the range is exactly where a
+  // colour picker leaves you. So where the inverse does not clear 4.5:1
+  // the label falls back to whichever of black or white does. Every
+  // colour Kelly named behaves as asked; the unreadable ones are the only
+  // ones that differ, and they were never readable.
+  function labelOn(hex) {
+    var bg = rgbOf(hex);
+    var inv = [255 - bg[0], 255 - bg[1], 255 - bg[2]];
+    if (contrast(inv, bg) >= 4.5) return hexOf(inv);
+    return relLum(bg) > 0.18 ? '#000000' : '#ffffff';
   }
 
   function hslHex(h, s, l) {
@@ -467,8 +514,20 @@ window.confettiPlayground = (function () {
     // Palette
     var pPal = panel('Colour');
     palettes.Random = randomPalette();
+    // Seeded from whatever palette the host opened on, so the six pickers
+    // start somewhere deliberate rather than on six identical blacks.
+    palettes.Custom = (palettes[palette] || []).slice(0, 6);
+    while (palettes.Custom.length < 6) palettes.Custom.push('#2563eb');
     var palRow = el('div', 'cbp-row');
     var swatches = el('div', 'cbp-swatches');
+
+    function selectPalette(name) {
+      palette = name;
+      [].forEach.call(palRow.children, function (o) {
+        o.setAttribute('aria-pressed', String(o.textContent === name));
+      });
+      paintSwatches();
+    }
 
     function paintSwatches() {
       swatches.innerHTML = '';
@@ -486,13 +545,9 @@ window.confettiPlayground = (function () {
       b.setAttribute('aria-pressed', String(name === palette));
       b.addEventListener('click', function () {
         // Random re-rolls every press, so it is a "give me another" rather
-        // than a fourth fixed palette you can only pick once.
+        // than one more fixed palette you can only pick once.
         if (name === 'Random') palettes.Random = randomPalette();
-        palette = name;
-        [].forEach.call(palRow.children, function (o) {
-          o.setAttribute('aria-pressed', String(o.textContent === name));
-        });
-        paintSwatches();
+        selectPalette(name);
       });
       palRow.appendChild(b);
     });
@@ -502,6 +557,51 @@ window.confettiPlayground = (function () {
     pPal.appendChild(el('p', 'cbp-hint',
       'Random re-rolls each time you press it. Six hues at one lightness — a ' +
       'much lighter piece reads as a gap in the burst rather than as a colour.'));
+
+    // Six colours of your own. Each opens the OS colour picker, wears the
+    // colour it holds and prints its hex, so the grid is both the control
+    // and the readout - there is nothing else to look at to know what you
+    // chose. Editing any of them selects Custom, because changing a colour
+    // and then having to remember to press a button for it to count is a
+    // step that exists only to be forgotten.
+    var customGrid = el('div', 'cbp-colours');
+    palettes.Custom.forEach(function (hex, i) {
+      var cell = el('label', 'cbp-colour');
+      var inp = document.createElement('input');
+      inp.type = 'color';
+      inp.value = hex;
+      inp.setAttribute('aria-label', 'Custom colour ' + (i + 1));
+      var face = el('span', 'cbp-colour-face');
+
+      function wear(v) {
+        cell.style.background = v;
+        face.textContent = v.toUpperCase();
+        face.style.color = labelOn(v);
+      }
+      wear(hex);
+
+      inp.addEventListener('input', function () {
+        palettes.Custom[i] = inp.value;
+        wear(inp.value);
+        selectPalette('Custom');
+      });
+      cell.appendChild(inp);
+      cell.appendChild(face);
+      customGrid.appendChild(cell);
+    });
+    pPal.appendChild(customGrid);
+    refs.customGrid = customGrid;
+    refs.repaintCustom = function () {
+      [].forEach.call(customGrid.children, function (cell, i) {
+        var v = palettes.Custom[i];
+        if (!v) return;
+        cell.querySelector('input').value = v;
+        cell.style.background = v;
+        var f = cell.querySelector('.cbp-colour-face');
+        f.textContent = v.toUpperCase();
+        f.style.color = labelOn(v);
+      });
+    };
 
     // Sound, if the host asked for it
     if (opts.sound) {
@@ -654,9 +754,10 @@ window.confettiPlayground = (function () {
       // happens to share their old number.
       all[n] = {
         v: 3, S: Object.assign({}, S), cannons: cannons.slice(), palette: palette,
-        // Random is re-rolled on every press, so the name alone would
-        // load a different set of colours than the one that was saved.
-        colors: palette === 'Random' ? (palettes.Random || []).slice() : null
+        // Random re-rolls on every press and Custom is edited in place,
+        // so for those two the name alone would load a different set of
+        // colours than the one that was saved.
+        colors: OWNED[palette] ? (palettes[palette] || []).slice() : null
       };
       if (writeStore(all)) { nameIn.value = ''; refreshPresets(); pick.value = n; preNote.textContent = 'Saved “' + n + '”.'; }
     });
@@ -671,14 +772,12 @@ window.confettiPlayground = (function () {
           return { at: from(c.at), dir: c.dir };
         });
       }
-      palette = saved.palette || palette;
-      if (palette === 'Random' && saved.colors && saved.colors.length) {
-        palettes.Random = saved.colors.slice();
+      var name = saved.palette || palette;
+      if (OWNED[name] && saved.colors && saved.colors.length) {
+        palettes[name] = saved.colors.slice();
+        if (name === 'Custom' && refs.repaintCustom) refs.repaintCustom();
       }
-      [].forEach.call(palRow.children, function (o) {
-        o.setAttribute('aria-pressed', String(o.textContent === palette));
-      });
-      paintSwatches();
+      selectPalette(name);
       syncSliders();
       paint();
       preNote.textContent = 'Loaded “' + pick.value + '”' + (
