@@ -20,7 +20,8 @@ what the snippet does:
 ```
 
 A snippet's language folder is about its runtime, not its reach — the Python
-tool below scans TypeScript, PHP, Go, and Java codebases just fine.
+tool below scans TypeScript, PHP, Go, and Java codebases just fine, and the
+JavaScript one needs only a browser you already have.
 
 ## Snippets
 
@@ -32,6 +33,15 @@ tool below scans TypeScript, PHP, Go, and Java codebases just fine.
 
 Needs Python 3.9+ on PATH. The launchers pick the first available `python`,
 `python3`, or `py`.
+
+### javascript
+
+| Snippet | What it does |
+| --- | --- |
+| [confetti-burst](javascript/confetti-burst/) | A confetti burst that falls like paper rather than sparks &mdash; air drag, tumble-driven flutter, and a numpad grid of firing positions |
+
+Needs a browser. No runtime to install and nothing to serve: open the
+snippet's `demo.html` and it runs.
 
 ### typescript
 
