@@ -1,0 +1,246 @@
+/*
+ * confetti-burst playground - Evomedia.net Snippets
+ * https://github.com/evomedia-net/evo.snippets
+ * Created by Kelly Michels - dev@evomedia.net
+ * Licensed under the MIT License. See LICENSE.
+ *
+ * Styling for the control panel that playground.js builds.
+ *
+ * Every colour, radius and font here comes from a --cbp-* variable with a
+ * fallback, so a host site can hand it their own design tokens without
+ * touching this file:
+ *
+ *   #confetti-playground {
+ *     --cbp-accent: var(--color-accent);
+ *     --cbp-font:   var(--font-sans);
+ *   }
+ *
+ * Left alone, the fallbacks give a neutral panel that looks deliberate
+ * rather than unstyled.
+ */
+
+.cbp {
+  --cbp-ink: var(--cbp-ink-override, #16202e);
+  --cbp-muted: var(--cbp-muted-override, #5b6a7d);
+  --cbp-line: var(--cbp-line-override, rgba(22, 32, 46, 0.14));
+  --cbp-surface: var(--cbp-surface-override, #ffffff);
+  --cbp-sunken: var(--cbp-sunken-override, #f4f6fa);
+  --cbp-accent: var(--cbp-accent-override, #2563eb);
+  --cbp-accent-ink: var(--cbp-accent-ink-override, #ffffff);
+  --cbp-radius: var(--cbp-radius-override, 10px);
+  --cbp-font: var(--cbp-font-override, inherit);
+  --cbp-mono: var(--cbp-mono-override, ui-monospace, Consolas, "Cascadia Code", monospace);
+
+  font-family: var(--cbp-font);
+  color: var(--cbp-ink);
+  display: grid;
+  gap: 1rem;
+}
+
+.cbp * { box-sizing: border-box; }
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+.cbp-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  align-items: start;
+}
+
+.cbp-panel {
+  background: var(--cbp-surface);
+  border: 1px solid var(--cbp-line);
+  border-radius: var(--cbp-radius);
+  padding: 1rem 1.1rem 1.15rem;
+  display: grid;
+  gap: 0.7rem;
+  align-content: start;
+}
+
+.cbp-panel > h3 {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cbp-muted);
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--cbp-line);
+}
+
+.cbp-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--cbp-muted);
+}
+
+.cbp-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+
+/* ── a slider with its readout ──────────────────────────────────────── */
+.cbp-ctl { display: grid; gap: 0.15rem; }
+
+.cbp-ctl > label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.83rem;
+  cursor: pointer;
+}
+
+.cbp-ctl output {
+  font-family: var(--cbp-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--cbp-accent);
+}
+
+.cbp input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  margin: 0.35rem 0 0;
+  border-radius: 999px;
+  background: var(--cbp-line);
+  cursor: pointer;
+}
+.cbp input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px; height: 15px;
+  border-radius: 50%;
+  background: var(--cbp-accent);
+  border: 2px solid var(--cbp-surface);
+  box-shadow: 0 0 0 1px var(--cbp-accent);
+  cursor: pointer;
+}
+.cbp input[type="range"]::-moz-range-thumb {
+  width: 15px; height: 15px;
+  border: none;
+  border-radius: 50%;
+  background: var(--cbp-accent);
+  box-shadow: 0 0 0 1px var(--cbp-accent);
+  cursor: pointer;
+}
+.cbp input[type="range"]:focus-visible {
+  outline: 2px solid var(--cbp-accent);
+  outline-offset: 3px;
+}
+
+/* ── the numpad ─────────────────────────────────────────────────────── */
+/* Laid out so 1 3 7 9 sit where the screen corners are. */
+.cbp-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.3rem;
+  max-width: 10.5rem;
+}
+.cbp-pad button {
+  height: 2.1rem;
+  padding: 0;
+  font: 600 0.85rem/1 var(--cbp-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--cbp-muted);
+  background: var(--cbp-surface);
+  border: 1px solid var(--cbp-line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.cbp-pad button:hover { border-color: var(--cbp-accent); color: var(--cbp-accent); }
+.cbp-pad button[aria-pressed="true"] {
+  background: var(--cbp-accent);
+  border-color: var(--cbp-accent);
+  color: var(--cbp-accent-ink);
+}
+.cbp-pad button:focus-visible { outline: 2px solid var(--cbp-accent); outline-offset: 2px; }
+
+/* ── per-cannon aim ─────────────────────────────────────────────────── */
+.cbp-aims { display: grid; gap: 0.4rem; }
+.cbp-aim {
+  display: grid;
+  grid-template-columns: 2.1rem 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.cbp-aim-at {
+  font: 600 0.8rem/1 var(--cbp-mono);
+  color: var(--cbp-accent);
+}
+.cbp-aim-deg {
+  font: 0.72rem/1 var(--cbp-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--cbp-muted);
+  white-space: nowrap;
+}
+
+/* ── buttons, text inputs ───────────────────────────────────────────── */
+.cbp-btn {
+  font: 600 0.85rem/1 var(--cbp-font);
+  padding: 0.55rem 0.85rem;
+  border-radius: 7px;
+  border: 1px solid var(--cbp-line);
+  background: var(--cbp-surface);
+  color: var(--cbp-ink);
+  cursor: pointer;
+}
+.cbp-btn:hover { border-color: var(--cbp-accent); }
+.cbp-btn:focus-visible { outline: 2px solid var(--cbp-accent); outline-offset: 2px; }
+.cbp-btn--go {
+  background: var(--cbp-accent);
+  border-color: var(--cbp-accent);
+  color: var(--cbp-accent-ink);
+}
+.cbp-btn--sm { padding: 0.32rem 0.55rem; font-size: 0.75rem; }
+
+.cbp input[type="text"],
+.cbp select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 0.42rem 0.55rem;
+  border-radius: 7px;
+  border: 1px solid var(--cbp-line);
+  background: var(--cbp-surface);
+  color: var(--cbp-ink);
+}
+.cbp input[type="text"] { font-family: var(--cbp-mono); }
+
+.cbp-check { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.85rem; }
+.cbp-check input { width: 15px; height: 15px; accent-color: var(--cbp-accent); cursor: pointer; }
+.cbp input[type="file"] { font-size: 0.78rem; color: var(--cbp-muted); max-width: 100%; }
+
+/* ── readings ───────────────────────────────────────────────────────── */
+.cbp-read { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.cbp-read th, .cbp-read td { text-align: left; padding: 0.32rem 0; border-bottom: 1px solid var(--cbp-line); }
+.cbp-read th { font-weight: 500; color: var(--cbp-muted); }
+.cbp-read td {
+  text-align: right;
+  font-family: var(--cbp-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.cbp-read tr:last-child th, .cbp-read tr:last-child td { border-bottom: 0; }
+
+.cbp-verdict { margin: 0; font-size: 0.78rem; line-height: 1.5; color: var(--cbp-muted); }
+
+.cbp-emit {
+  margin: 0;
+  padding: 0.8rem 0.9rem;
+  overflow-x: auto;
+  background: var(--cbp-sunken);
+  border: 1px solid var(--cbp-line);
+  border-radius: var(--cbp-radius);
+  font-family: var(--cbp-mono);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--cbp-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cbp * { transition: none !important; }
+}
