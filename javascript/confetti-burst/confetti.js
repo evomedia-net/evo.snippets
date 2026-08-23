@@ -52,14 +52,21 @@ window.confettiBurst = (function () {
   // unreadable in a table, where the aim is the thing a person actually
   // reads. Converted once, at the entry point, so only one convention
   // ever reaches the particle loop.
-  // The pad is a 5x5, numbered like a numpad: 1 bottom-left, 5
-  // bottom-right, 21 top-left, 25 top-right, 13 dead centre.
+  // The pad is a 5x5, numbered like a PHONE keypad: 1 2 3 across the top,
+  // counting down the screen. 1 is top-left, 5 top-right, 21 bottom-left,
+  // 25 bottom-right, 13 dead centre.
   //
-  //     21 22 23 24 25
-  //     16 17 18 19 20
-  //     11 12 13 14 15
-  //      6  7  8  9 10
   //      1  2  3  4  5
+  //      6  7  8  9 10
+  //     11 12 13 14 15
+  //     16 17 18 19 20
+  //     21 22 23 24 25
+  //
+  // Phone order rather than the calculator order a numeric keypad uses,
+  // which runs 7 8 9 along the top. Both are "a numpad"; only one of them
+  // is the layout people touch every day, and reading 1 2 3 at the top of
+  // a grid and having it mean the bottom of the screen is a trap the
+  // reader falls into once per sitting.
   //
   // It was a 3x3 until the half-steps earned cells of their own. The nine
   // positions the 3x3 had are still here - 1, 3, 5, 11, 13, 15, 21, 23, 25
@@ -68,17 +75,17 @@ window.confettiBurst = (function () {
   // aim inward with a slight upward bias, which lands within a few degrees
   // of the tuned nine and so reads as one continuous table rather than two.
   var PAD = {
-    21: { origin: { x: -0.02, y: -0.02 }, direction:    130 },
-    22: { origin: { x:  0.25, y: -0.02 }, direction:    142 },
-    23: { origin: { x:  0.50, y: -0.04 }, direction:    180 },
-    24: { origin: { x:  0.75, y: -0.02 }, direction:   -142 },
-    25: { origin: { x:  1.02, y: -0.02 }, direction:   -130 },
+     1: { origin: { x: -0.02, y: -0.02 }, direction:    130 },
+     2: { origin: { x:  0.25, y: -0.02 }, direction:    142 },
+     3: { origin: { x:  0.50, y: -0.04 }, direction:    180 },
+     4: { origin: { x:  0.75, y: -0.02 }, direction:   -142 },
+     5: { origin: { x:  1.02, y: -0.02 }, direction:   -130 },
 
-    16: { origin: { x: -0.02, y:  0.24 }, direction:     98 },
-    17: { origin: { x:  0.25, y:  0.24 }, direction:  105.5 },
-    18: { origin: { x:  0.50, y:  0.24 }, direction:    180 },
-    19: { origin: { x:  0.75, y:  0.24 }, direction: -105.5 },
-    20: { origin: { x:  1.02, y:  0.24 }, direction:    -98 },
+     6: { origin: { x: -0.02, y:  0.24 }, direction:     98 },
+     7: { origin: { x:  0.25, y:  0.24 }, direction:  105.5 },
+     8: { origin: { x:  0.50, y:  0.24 }, direction:    180 },
+     9: { origin: { x:  0.75, y:  0.24 }, direction: -105.5 },
+    10: { origin: { x:  1.02, y:  0.24 }, direction:    -98 },
 
     11: { origin: { x: -0.02, y:  0.50 }, direction:     65 },
     12: { origin: { x:  0.25, y:  0.50 }, direction:     54 },
@@ -86,17 +93,17 @@ window.confettiBurst = (function () {
     14: { origin: { x:  0.75, y:  0.50 }, direction:    -54 },
     15: { origin: { x:  1.02, y:  0.50 }, direction:    -65 },
 
-     6: { origin: { x: -0.02, y:  0.76 }, direction:   49.5 },
-     7: { origin: { x:  0.25, y:  0.76 }, direction:     30 },
-     8: { origin: { x:  0.50, y:  0.76 }, direction:      0 },
-     9: { origin: { x:  0.75, y:  0.76 }, direction:    -30 },
-    10: { origin: { x:  1.02, y:  0.76 }, direction:  -49.5 },
+    16: { origin: { x: -0.02, y:  0.76 }, direction:   49.5 },
+    17: { origin: { x:  0.25, y:  0.76 }, direction:     30 },
+    18: { origin: { x:  0.50, y:  0.76 }, direction:      0 },
+    19: { origin: { x:  0.75, y:  0.76 }, direction:    -30 },
+    20: { origin: { x:  1.02, y:  0.76 }, direction:  -49.5 },
 
-     1: { origin: { x: -0.02, y:  1.02 }, direction:     35 },
-     2: { origin: { x:  0.25, y:  1.02 }, direction:     20 },
-     3: { origin: { x:  0.50, y:  1.04 }, direction:      0 },
-     4: { origin: { x:  0.75, y:  1.02 }, direction:    -20 },
-     5: { origin: { x:  1.02, y:  1.02 }, direction:    -35 }
+    21: { origin: { x: -0.02, y:  1.02 }, direction:     35 },
+    22: { origin: { x:  0.25, y:  1.02 }, direction:     20 },
+    23: { origin: { x:  0.50, y:  1.04 }, direction:      0 },
+    24: { origin: { x:  0.75, y:  1.02 }, direction:    -20 },
+    25: { origin: { x:  1.02, y:  1.02 }, direction:    -35 }
   };
 
   function toCanvasAngle(direction) { return direction - 90; }
@@ -104,7 +111,8 @@ window.confettiBurst = (function () {
   // Fractions slide between neighbouring keys. The 5x5 already has a cell
   // for every half-step the old 3x3 needed one for, so fractions are now a
   // quarter-step rather than the only way to reach the middle of an edge —
-  // 21, 22, 23, 24, 25 is the top edge, spelled with whole numbers.
+  // 1, 2, 3, 4, 5 is the top edge, spelled with whole numbers. Any fraction
+  // works, not only halves: 4.1 is a tenth of the way from 4 to 5.
   //
   // Consecutive keys are adjacent WITHIN a row, so those fractions land
   // where you would point. The four that step between rows (5.5, 10.5,

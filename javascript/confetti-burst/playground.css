@@ -211,6 +211,17 @@
 }
 .cbp-btn:hover { border-color: var(--cbp-accent); }
 .cbp-btn:focus-visible { outline: 2px solid var(--cbp-accent); outline-offset: 2px; }
+
+/* A button that holds a choice has to look like it holds one. The palette
+   buttons were setting aria-pressed and styling nothing, so the panel told
+   a screen reader which palette was in use and told everyone else
+   nothing. Same treatment the pad keys use for the same meaning, so
+   "selected" looks like one thing throughout. */
+.cbp-btn[aria-pressed="true"] {
+  background: var(--cbp-accent);
+  border-color: var(--cbp-accent);
+  color: var(--cbp-accent-ink);
+}
 .cbp-btn--go {
   background: var(--cbp-accent);
   border-color: var(--cbp-accent);
@@ -244,6 +255,16 @@
 .cbp input[type="range"]:disabled { opacity: 0.45; cursor: default; }
 .cbp-check input { width: 15px; height: 15px; accent-color: var(--cbp-accent); cursor: pointer; }
 .cbp input[type="file"] { font-size: 0.78rem; color: var(--cbp-muted); max-width: 100%; }
+
+/* The palette you are actually holding. Random re-rolls on every press,
+   so without these the only way to see what you got is to fire. */
+.cbp-swatches { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.cbp-swatch {
+  width: 1.5rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  border: 1px solid var(--cbp-line);
+}
 
 /* ── readings ───────────────────────────────────────────────────────── */
 .cbp-read { width: 100%; border-collapse: collapse; font-size: 0.8rem; }

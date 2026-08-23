@@ -41,11 +41,11 @@ window.confettiPlayground = (function () {
   // plain map because the renderer does not expose one - if that ever
   // changes, read it from there instead of keeping a second copy.
   var PAD_AIM = {
-     1:   35,  2:    20,  3:   0,  4:  -20,  5:  -35,
-     6:  49.5,  7:   30,  8:   0,  9:  -30, 10: -49.5,
-    11:   65, 12:    54, 13:   0, 14:  -54, 15:  -65,
-    16:   98, 17: 105.5, 18: 180, 19: -105.5, 20: -98,
-    21:  130, 22:   142, 23: 180, 24: -142, 25: -130
+     1:  130,  2:   142,  3: 180,  4:   -142,  5: -130,
+     6:   98,  7: 105.5,  8: 180,  9: -105.5, 10:  -98,
+    11:   65, 12:    54, 13:   0, 14:    -54, 15:  -65,
+    16: 49.5, 17:    30, 18:   0, 19:    -30, 20: -49.5,
+    21:   35, 22:    20, 23:   0, 24:    -20, 25:  -35
   };
 
   var SLIDERS = [
@@ -72,29 +72,68 @@ window.confettiPlayground = (function () {
   };
 
   var SETS = {
-    'Four corners': [1, 5, 25, 21],
-    'Across the top': [21, 22, 23, 24, 25],
-    'Across the bottom': [1, 2, 3, 4, 5],
-    'Up both sides': [1, 6, 11, 16, 21, 5, 10, 15, 20, 25],
+    'Four corners': [21, 25, 5, 1],
+    'Across the top': [1, 2, 3, 4, 5],
+    'Across the bottom': [21, 22, 23, 24, 25],
+    'Up both sides': [21, 16, 11, 6, 1, 25, 20, 15, 10, 5],
     'Centre': [13]
   };
 
   var STORE = 'confettiPlaygroundPresets';
 
-  // The pad was a 3x3 numbered 1-9, with halves for the cells between.
-  // Every one of those positions has an exact cell on the 5x5, so a
-  // preset saved under the old scheme is moved rather than dropped:
-  // 7 -> 21, 7.5 -> 22, 8 -> 23 ... 2.5 -> 4, 3 -> 5.
+  // Saved setups carry the numbering they were written in, so each old
+  // scheme gets a way back to the current one. Positions are moved rather
+  // than dropped - every one of them has an exact cell here.
   //
-  // 3.5 and 6.5 are the exception. They stepped diagonally between rows
-  // and had no cell of their own, so they land on the end of their row.
-  function padFrom3x3(k) {
+  // v1: the 3x3 numbered 1-9 in calculator order, halves for the cells
+  //     between. 7 -> 1, 7.5 -> 2, 8 -> 3 ... 2.5 -> 24, 3 -> 25.
+  //     3.5 and 6.5 are the exception: they stepped diagonally between
+  //     rows and had no cell of their own, so they land on the end of
+  //     their row.
+  // v2: the 5x5 in calculator order, 21 22 23 24 25 across the top. A
+  //     vertical flip. It never shipped, but it did run on a review
+  //     server, and a preset that quietly points at the mirror image of
+  //     where it was written is worse than one that refuses to load.
+  function padFromV1(k) {
     if (!isFinite(k)) return 13;
     var base = Math.floor(k), half = k - base >= 0.5 ? 1 : 0;
     base = Math.max(1, Math.min(9, base));
     var col = Math.min(4, ((base - 1) % 3) * 2 + half);
-    var row = Math.floor((base - 1) / 3) * 2;
-    return row * 5 + col + 1;
+    var rowFromTop = 2 - Math.floor((base - 1) / 3);
+    return rowFromTop * 2 * 5 + col + 1;
+  }
+
+  function padFromV2(k) {
+    if (!isFinite(k)) return 13;
+    var i = Math.max(1, Math.min(25, Math.round(k))) - 1;
+    return (4 - Math.floor(i / 5)) * 5 + (i % 5) + 1;
+  }
+
+  // Six hues at ONE lightness, spaced around the wheel with a little
+  // jitter so the set reads as chosen rather than as six random colours.
+  // The single lightness is the part that matters: mix light and dark and
+  // the light pieces read as gaps in the burst rather than as colours.
+  function randomPalette() {
+    var start = Math.random() * 360;
+    var light = 49 + Math.random() * 7;
+    var sat = 62 + Math.random() * 16;
+    var out = [];
+    for (var i = 0; i < 6; i++) {
+      out.push(hslHex((start + i * 60 + (Math.random() - 0.5) * 26 + 360) % 360, sat, light));
+    }
+    return out;
+  }
+
+  function hslHex(h, s, l) {
+    s /= 100; l /= 100;
+    var a = s * Math.min(l, 1 - l);
+    function chan(n) {
+      var k = (n + h / 30) % 12;
+      var v = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)));
+      var hx = Math.round(255 * v).toString(16);
+      return hx.length < 2 ? '0' + hx : hx;
+    }
+    return '#' + chan(0) + chan(8) + chan(4);
   }
 
   function el(tag, cls, text) {
@@ -115,10 +154,13 @@ window.confettiPlayground = (function () {
     var opts = options || {};
     var S = Object.assign({}, DEFAULTS, opts.defaults || {});
     var palette = opts.palette || 'Brand';
-    var palettes = opts.palettes || PALETTES;
+    var palettes = Object.assign({}, opts.palettes || PALETTES);
     // {at, dir} - dir null means "use the position's own aim", which is
     // what lets one cannon be turned without disturbing the others.
-    var cannons = [{ at: 1, dir: null }, { at: 3, dir: null }, { at: 5, dir: null }];
+    // The bottom row - 21, 23, 25 - which is where 1, 3, 5 pointed before
+    // the pad was flipped to phone order. Confetti rising from below the
+    // bottom edge is the shape the panel should open on.
+    var cannons = [{ at: 21, dir: null }, { at: 23, dir: null }, { at: 25, dir: null }];
 
     host.classList.add('cbp');
     var grid = el('div', 'cbp-grid');
@@ -271,14 +313,15 @@ window.confettiPlayground = (function () {
     // Positions
     var pPos = panel('Where it fires from');
     pPos.appendChild(el('p', 'cbp-hint',
-      'Numbered like a numpad, so 1 5 21 25 are the four screen corners and 13 ' +
-      'is dead centre. Pick as many as you like — they fire in the order shown.'));
+      'Numbered like a phone keypad — 1 2 3 across the top — so 1 and 5 are the ' +
+      'top corners, 21 and 25 the bottom ones, and 13 is dead centre. Pick as ' +
+      'many as you like; they fire in the order shown.'));
     var pad = el('div', 'cbp-pad');
-    [21, 22, 23, 24, 25,
-     16, 17, 18, 19, 20,
-     11, 12, 13, 14, 15,
+    [ 1,  2,  3,  4,  5,
       6,  7,  8,  9, 10,
-      1,  2,  3,  4,  5].forEach(function (n) {
+     11, 12, 13, 14, 15,
+     16, 17, 18, 19, 20,
+     21, 22, 23, 24, 25].forEach(function (n) {
       var b = el('button', null, String(n));
       b.type = 'button';
       b.setAttribute('data-at', n);
@@ -310,7 +353,7 @@ window.confettiPlayground = (function () {
       cannons = listInput.value.split(/[,\s]+/).filter(Boolean).map(function (raw) {
         var bits = String(raw).split('@');
         return {
-          at: Math.round(parseFloat(bits[0]) * 2) / 2,
+          at: Math.round(parseFloat(bits[0]) * 100) / 100,
           dir: bits.length > 1 && bits[1] !== '' ? parseFloat(bits[1]) : null
         };
       }).filter(function (c) { return isFinite(c.at) && c.at >= 1 && c.at <= 25; });
@@ -318,9 +361,10 @@ window.confettiPlayground = (function () {
     });
     pPos.appendChild(listInput);
     pPos.appendChild(el('p', 'cbp-hint',
-      'The top edge is 21, 22, 23, 24, 25 — the half-steps have cells of their ' +
-      'own now, so whole numbers reach every one. Halves still land between ' +
-      'neighbours if you want a quarter-step. Add @ and an angle to aim one: 21@90.'));
+      'The top edge is 1, 2, 3, 4, 5 — the half-steps have cells of their own ' +
+      'now, so whole numbers reach every one. Any fraction still lands between ' +
+      'neighbours: 4.1 is a tenth of the way from 4 to 5. Add @ and an angle to ' +
+      'aim one: 1@90.'));
 
     // Per-cannon aim
     var pAim = panel('Aim, per cannon');
@@ -422,20 +466,42 @@ window.confettiPlayground = (function () {
 
     // Palette
     var pPal = panel('Colour');
+    palettes.Random = randomPalette();
     var palRow = el('div', 'cbp-row');
+    var swatches = el('div', 'cbp-swatches');
+
+    function paintSwatches() {
+      swatches.innerHTML = '';
+      (palettes[palette] || []).forEach(function (c) {
+        var sw = el('span', 'cbp-swatch');
+        sw.style.background = c;
+        sw.title = c;
+        swatches.appendChild(sw);
+      });
+    }
+
     Object.keys(palettes).forEach(function (name) {
       var b = el('button', 'cbp-btn cbp-btn--sm', name);
       b.type = 'button';
       b.setAttribute('aria-pressed', String(name === palette));
       b.addEventListener('click', function () {
+        // Random re-rolls every press, so it is a "give me another" rather
+        // than a fourth fixed palette you can only pick once.
+        if (name === 'Random') palettes.Random = randomPalette();
         palette = name;
         [].forEach.call(palRow.children, function (o) {
           o.setAttribute('aria-pressed', String(o.textContent === name));
         });
+        paintSwatches();
       });
       palRow.appendChild(b);
     });
     pPal.appendChild(palRow);
+    pPal.appendChild(swatches);
+    paintSwatches();
+    pPal.appendChild(el('p', 'cbp-hint',
+      'Random re-rolls each time you press it. Six hues at one lightness — a ' +
+      'much lighter piece reads as a gap in the burst rather than as a colour.'));
 
     // Sound, if the host asked for it
     if (opts.sound) {
@@ -582,10 +648,16 @@ window.confettiPlayground = (function () {
       var n = (nameIn.value || '').trim();
       if (!n) { preNote.textContent = 'Give it a name first.'; return; }
       var all = readStore();
-      // v2 is the 5x5 pad. Unstamped saves are v1 - the 3x3 - and their
-      // positions get moved on the way back in, rather than pointing at
-      // whatever cell happens to share their old number.
-      all[n] = { v: 2, S: Object.assign({}, S), cannons: cannons.slice(), palette: palette };
+      // v3 is the 5x5 in phone-keypad order. Unstamped saves are v1 (the
+      // 3x3); v2 is the same 5x5 upside down. Either way the positions get
+      // moved on the way back in, rather than pointing at whatever cell
+      // happens to share their old number.
+      all[n] = {
+        v: 3, S: Object.assign({}, S), cannons: cannons.slice(), palette: palette,
+        // Random is re-rolled on every press, so the name alone would
+        // load a different set of colours than the one that was saved.
+        colors: palette === 'Random' ? (palettes.Random || []).slice() : null
+      };
       if (writeStore(all)) { nameIn.value = ''; refreshPresets(); pick.value = n; preNote.textContent = 'Saved “' + n + '”.'; }
     });
     loadB.addEventListener('click', function () {
@@ -593,17 +665,27 @@ window.confettiPlayground = (function () {
       if (!saved) return;
       Object.keys(saved.S || {}).forEach(function (k) { if (k in S) S[k] = saved.S[k]; });
       cannons = (saved.cannons || cannons).slice();
-      var moved = saved.v !== 2;
-      if (moved) {
+      var from = saved.v === 3 ? null : saved.v === 2 ? padFromV2 : padFromV1;
+      if (from) {
         cannons = cannons.map(function (c) {
-          return { at: padFrom3x3(c.at), dir: c.dir };
+          return { at: from(c.at), dir: c.dir };
         });
       }
       palette = saved.palette || palette;
+      if (palette === 'Random' && saved.colors && saved.colors.length) {
+        palettes.Random = saved.colors.slice();
+      }
+      [].forEach.call(palRow.children, function (o) {
+        o.setAttribute('aria-pressed', String(o.textContent === palette));
+      });
+      paintSwatches();
       syncSliders();
       paint();
-      preNote.textContent = 'Loaded “' + pick.value + '”' +
-        (moved ? ' — saved on the old 3×3 pad, so its positions moved.' : '.');
+      preNote.textContent = 'Loaded “' + pick.value + '”' + (
+        !from ? '.'
+          : saved.v === 2
+            ? ' — saved before the pad was flipped to phone order, so its positions moved.'
+            : ' — saved on the old 3×3 pad, so its positions moved.');
     });
     delB.addEventListener('click', function () {
       var all = readStore();

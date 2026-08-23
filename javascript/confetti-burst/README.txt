@@ -37,8 +37,8 @@ Use
     <script src="confetti.js"></script>
     <script>
       confettiBurst();                        // straight up from the middle
-      confettiBurst({ origin: 21 });          // from the top-left corner
-      confettiBurst({ origin: 5, direction: 315, count: 200 });
+      confettiBurst({ origin: 1 });           // from the top-left corner
+      confettiBurst({ origin: 25, direction: 315, count: 200 });
     </script>
 
 It creates its own canvas on the first call and removes nothing - call it as
@@ -47,14 +47,20 @@ often as you like.
 Firing positions
 ----------------
 
-Positions are numbered like a numpad, on a 5×5 grid, so the corner keys are
-the screen corners and 13 is dead centre:
+Positions are numbered like a phone keypad - 1 2 3 across the top - on a
+5×5 grid, so the corner keys are the screen corners and 13 is dead centre:
 
-    21 22 23 24 25      top-left    ..    top    ..    top-right
-    16 17 18 19 20
-    11 12 13 14 15      left        ..   centre  ..    right
+     1  2  3  4  5      top-left    ..    top    ..    top-right
      6  7  8  9 10
-     1  2  3  4  5      bottom-left ..   bottom  ..    bottom-right
+    11 12 13 14 15      left        ..   centre  ..    right
+    16 17 18 19 20
+    21 22 23 24 25      bottom-left ..   bottom  ..    bottom-right
+
+Phone order, not the calculator order a numeric keypad uses - that one runs
+7 8 9 along the top. Both are fairly called "a numpad"; only one of them is
+the layout people touch every day. Reading 1 2 3 at the top of a grid and
+having it mean the bottom of the screen is a trap you fall into once per
+sitting.
 
 Each key carries its own aim as well as its position, because the two are
 not independent: a corner cannon firing straight up throws half its pieces
@@ -66,18 +72,19 @@ origins and their old hand-tuned aims, so a corner burst looks exactly as it
 did. The sixteen new cells aim inward with a slight upward bias, which lands
 within a few degrees of the tuned nine.
 
-A row of cannons across the top is 21, 22, 23, 24, 25 - whole numbers reach
-every position now, where the 3×3 needed 7, 7.5, 8, 8.5, 9 to say the same
-thing. Fractions still slide between neighbouring keys, position and aim
-together, so they remain available as a quarter-step. Consecutive keys are
-adjacent within a row; the four that step between rows (5.5, 10.5,
-15.5, 20.5) slide diagonally across the screen: defined, and rarely what
-anyone wants.
+A row of cannons across the top is 1, 2, 3, 4, 5 - whole numbers reach every
+position now, where the 3×3 needed 7, 7.5, 8, 8.5, 9 to say the same thing.
+
+Fractions still slide between neighbouring keys, position and aim together, and
+any fraction works, not only halves: 4.1 is a tenth of the way from 4 to
+5. Consecutive keys are adjacent within a row; the four that step between
+rows (5.5, 10.5, 15.5, 20.5) slide diagonally across the screen:
+defined, and rarely what anyone wants.
 
 A volley is just repeated calls - the renderer draws one burst, and the caller
 decides how many and how far apart:
 
-    [1, 5, 25, 21].forEach(function (at, i) {
+    [21, 25, 5, 1].forEach(function (at, i) {
       setTimeout(function () { confettiBurst({ origin: at, count: 60 }); }, i * 220);
     });
 
@@ -92,6 +99,13 @@ The playground
 demo.html is a full control panel - every firing position, every force,
 live readings, and the settings ready to paste back into code. Open it and
 play; nothing to install.
+
+The palette row carries a Random button that re-rolls on every press:
+six hues spaced round the wheel at one lightness, because mixing light and
+dark makes the light pieces read as gaps in the burst rather than as
+colours. Swatches under the row show whichever palette is in hand, so you
+can see what you rolled without firing. A saved setup on Random keeps the
+exact colours it was saved with.
 
 The panel is a component, not page markup:
 
@@ -139,7 +153,7 @@ Options
 | Option | Default | What it does |
 | --- | --- | --- |
 | count | 140 | pieces in this burst |
-| origin | { x: 0.5, y: 0.62 } | 1-25 for a numpad position on the 5×5 grid (fractions allowed), or {x, y} in fractions of the viewport |
+| origin | { x: 0.5, y: 0.62 } | 1-25 for a keypad position on the 5×5 grid (any fraction allowed), or {x, y} in fractions of the viewport |
 | direction | position's own aim, else 0 | a compass: 0 straight up, 90 right, 180 straight down, 270 left. Wraps, so 350 and -10 are the same aim |
 | spread | 70 | degrees of cone around the aim |
 | velocity | 34 | launch speed, px per frame at 60fps, applied straight to position |
