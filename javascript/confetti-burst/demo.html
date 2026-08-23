@@ -12,6 +12,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>confetti-burst — demo</title>
+<link rel="stylesheet" href="playground.css">
 <style>
   :root {
     color-scheme: light dark;
@@ -75,44 +76,7 @@
       throwing dots on a ballistic arc.</p>
   </div>
 
-  <div class="card">
-    <h2>Fire</h2>
-    <div class="row">
-      <button class="go" id="middle">From the middle</button>
-      <button id="bottom">Three across the bottom</button>
-      <button id="corners">Four corners</button>
-      <button id="top">Five across the top</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Sound</h2>
-    <label class="check">
-      <input type="checkbox" id="use-sound">
-      <span>Use sound</span>
-    </label>
-    <div class="row" id="sound-picker" hidden>
-      <input type="file" id="sound-file" accept="audio/*">
-      <button type="button" id="sound-clear">Use the bundled clip</button>
-    </div>
-    <p id="sound-note">Off. The renderer has no audio of its own &mdash; sound is
-      the caller&rsquo;s job, because browsers refuse to play it until the page has
-      been interacted with.</p>
-  </div>
-
-  <div class="card">
-    <h2>Any position</h2>
-    <p>Numbered like a numpad, so <code>1 3 7 9</code> are the four screen
-      corners. Each carries its own aim, because a corner cannon firing
-      straight up throws half its pieces off-screen.</p>
-    <div class="pad">
-      <button data-at="7">7</button><button data-at="8">8</button><button data-at="9">9</button>
-      <button data-at="4">4</button><button data-at="5">5</button><button data-at="6">6</button>
-      <button data-at="1">1</button><button data-at="2">2</button><button data-at="3">3</button>
-    </div>
-    <p>Halves land between neighbours, so <code>7, 7.5, 8, 8.5, 9</code> is five
-      evenly spaced across the top.</p>
-  </div>
+  <div id="playground"></div>
 
   <div class="card">
     <h2>Using it</h2>
@@ -126,102 +90,13 @@
 </main>
 
 <script src="confetti.js"></script>
+<script src="playground.js"></script>
 <script>
-  (function () {
-    'use strict';
-
-    // ── sound ──────────────────────────────────────────────────────
-    // Deliberately NOT part of the renderer. Browsers refuse to play
-    // audio until the page has been interacted with, and only the caller
-    // knows whether that has happened - a burst fired by a server push on
-    // a page nobody has touched will throw NotAllowedError, every time.
-    // Here every burst follows a click, so it is always allowed.
-    var BUNDLED = 'confetti.mp3';
-    var useSound = document.getElementById('use-sound');
-    var picker = document.getElementById('sound-picker');
-    var filePick = document.getElementById('sound-file');
-    var clearBtn = document.getElementById('sound-clear');
-    var note = document.getElementById('sound-note');
-    var soundUrl = BUNDLED;
-    var objectUrl = null;
-
-    function say(msg) { note.textContent = msg; }
-
-    function setFile(file) {
-      // Revoked before replacing: each createObjectURL pins the blob in
-      // memory until it is released, and a few dozen picks add up.
-      if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
-      if (!file) {
-        soundUrl = BUNDLED;
-        say('Using the bundled clip. See NOTICE.md for its licence.');
-        return;
-      }
-      objectUrl = URL.createObjectURL(file);
-      soundUrl = objectUrl;
-      say('Using ' + file.name + '. Nothing is uploaded - it is read from your machine.');
-    }
-
-    useSound.addEventListener('change', function () {
-      picker.hidden = !useSound.checked;
-      if (useSound.checked) {
-        setFile(filePick.files && filePick.files[0]);
-      } else {
-        say('Off. The renderer has no audio of its own.');
-      }
-    });
-
-    filePick.addEventListener('change', function () {
-      setFile(filePick.files && filePick.files[0]);
-    });
-
-    clearBtn.addEventListener('click', function () {
-      filePick.value = '';
-      setFile(null);
-    });
-
-    function play() {
-      if (!useSound.checked) return;
-      var a = new Audio(soundUrl);
-      // A fresh Audio per burst, so a second burst before the first has
-      // finished overlaps rather than restarting it.
-      a.play().catch(function (e) {
-        say('The browser would not play it: ' + e.name +
-            '. Audio needs the page to have been interacted with first.');
-      });
-    }
-
-    // A volley is just repeated calls: the renderer draws one burst, and
-    // the caller decides how many and how far apart.
-    function volley(positions, gap, opts) {
-      play();
-      positions.forEach(function (at, i) {
-        setTimeout(function () {
-          confettiBurst(Object.assign({ origin: at }, opts || {}));
-        }, i * gap);
-      });
-    }
-
-    document.getElementById('middle').onclick = function () {
-      play();
-      confettiBurst({ origin: 5, count: 220, spread: 120 });
-    };
-    document.getElementById('bottom').onclick = function () {
-      volley([1, 2, 3], 500, { count: 60 });
-    };
-    document.getElementById('corners').onclick = function () {
-      volley([1, 3, 9, 7], 220, { count: 60 });
-    };
-    document.getElementById('top').onclick = function () {
-      volley([7, 7.5, 8, 8.5, 9], 160, { count: 45 });
-    };
-
-    [].forEach.call(document.querySelectorAll('[data-at]'), function (b) {
-      b.onclick = function () {
-        play();
-        confettiBurst({ origin: Number(b.dataset.at), count: 90 });
-      };
-    });
-  })();
+  // The whole control panel comes from playground.js, which builds its
+  // own markup. The website that also hosts this panel passes different
+  // colours through the --cbp-* variables and gets the same controls -
+  // there is one source, not two copies drifting apart.
+  confettiPlayground.mount('#playground', { sound: true });
 </script>
 </body>
 </html>

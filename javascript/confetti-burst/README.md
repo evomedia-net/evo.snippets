@@ -76,6 +76,37 @@ decides how many and how far apart:
 });
 ```
 
+## The playground
+
+`demo.html` is a full control panel — every firing position, every force,
+live readings, and the settings ready to paste back into code. Open it and
+play; nothing to install.
+
+The panel is a component, not page markup:
+
+```html
+<link rel="stylesheet" href="playground.css">
+<div id="playground"></div>
+<script src="confetti.js"></script>
+<script src="playground.js"></script>
+<script>confettiPlayground.mount('#playground', { sound: true });</script>
+```
+
+It builds its own DOM, so a host supplies an empty div rather than a page
+full of the right ids. That matters because two pages wanted this panel —
+this demo and a website — and markup copied between them is markup that
+drifts: one gains a control and the other quietly does not.
+
+Colours come from `--cbp-*` custom properties, so a host restyles it with
+its own design tokens instead of overriding rules:
+
+```css
+#playground { --cbp-accent-override: #336699; --cbp-font-override: var(--font-sans); }
+```
+
+`mount()` returns a handle with `fire()`, `settings` and `positions`, for a
+page that wants to drive it from elsewhere.
+
 ## Sound
 
 The renderer has **no audio**, on purpose. Browsers refuse to play sound
