@@ -111,6 +111,13 @@ dark makes the light pieces read as gaps in the burst rather than as
 colours. Swatches under the row show whichever palette is in hand, so you
 can see what you rolled without firing.
 
+Each aim row carries a **Snap Angle 45°** button, drawn as the angle it
+makes. Off a multiple it jumps to the nearest one — 60° and 52° both give
+45° — and once on a multiple each further click advances: 45, 90, 135. It
+holds no click counter; being on a multiple *is* the state, so the second
+click behaves differently because the world changed rather than because
+something remembered.
+
 Loop has a **Repeat every** control beside it. It has to be a control
 rather than a constant: pieces live `age` seconds, so any gap much shorter
 than that merges the volleys into one continuous cloud and the checkbox

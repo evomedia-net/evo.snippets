@@ -134,6 +134,25 @@ window.confettiPlayground = (function () {
     return out;
   }
 
+  // Where a click on Snap 45 should land.
+  //
+  // Off a multiple, it goes to the NEAREST one - 60 and 52 both give 45,
+  // which is the point: 45 is the angle people actually want and the
+  // slider is a clumsy way to hit it. Already on a multiple, it advances
+  // to the next, so repeated clicks walk 45, 90, 135 rather than sticking.
+  //
+  // No click counter anywhere: landing on a multiple IS the state, so the
+  // second click behaves differently because the world changed, not
+  // because something remembered.
+  function snap45(deg) {
+    var v = (Math.abs(deg % 45) < 0.5) ? deg + 45 : Math.round(deg / 45) * 45;
+    // Back into (-180, 180], the range the slider speaks. 180 is left
+    // alone rather than folded to -180, which would look like a click
+    // that did nothing.
+    v = ((v % 360) + 360) % 360;
+    return v > 180 ? v - 360 : v;
+  }
+
   function rgbOf(hex) {
     var n = parseInt(String(hex).replace('#', ''), 16);
     return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
@@ -438,6 +457,19 @@ window.confettiPlayground = (function () {
         // "-105°" is a number you have to convert; an arrow is the answer.
         // Drawn pointing up, because up is 0 on the compass the aim uses,
         // so the rotation is the bearing with no conversion in between.
+        // Snap to 45. Drawn as the thing it does - a baseline, a ray at
+        // 45 degrees off it, and the arc between them - because a button
+        // that looks like its own result needs no reading.
+        var snap = el('button', 'cbp-aim-snap');
+        snap.type = 'button';
+        snap.title = 'Snap Angle 45°';
+        snap.setAttribute('aria-label', 'Snap the aim to the next 45 degrees');
+        snap.innerHTML =
+          '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+          '<path d="M4 19H20M4 19L17 6"/>' +
+          '<path class="cbp-aim-snap-arc" d="M12 19A8 8 0 0 0 9.66 13.34"/>' +
+          '</svg>';
+
         var arrow = el('span', 'cbp-aim-arrow');
         arrow.setAttribute('aria-hidden', 'true');
         arrow.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21V4M12 3l-6 7M12 3l6 7"/></svg>';
@@ -483,6 +515,13 @@ window.confettiPlayground = (function () {
           listInput.value = text();
           readings();
         });
+        snap.addEventListener('click', function () {
+          sl.value = String(snap45(parseFloat(sl.value)));
+          // Same path the slider takes, so the arrow, the readout, the
+          // positions field and the readings all move together.
+          sl.dispatchEvent(new Event('input'));
+        });
+        row.appendChild(snap);
         row.appendChild(arrow);
         row.appendChild(sl);
         row.appendChild(deg);
