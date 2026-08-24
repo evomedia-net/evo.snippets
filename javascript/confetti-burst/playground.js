@@ -442,11 +442,35 @@ window.confettiPlayground = (function () {
         sl.value = Math.round(aimOf(c));
         sl.setAttribute('aria-label', 'Aim for position ' + c.at);
         var deg = el('span', 'cbp-aim-deg');
+        // Where the arrow is actually pointing, UNWRAPPED - it keeps
+        // counting past 360 and below 0 rather than being folded back into
+        // a circle. The bearing itself wraps, and if the transform wrapped
+        // with it the arrow would take the long way round: -5 normalises to
+        // 355, and CSS interpolates rotate(355deg) -> rotate(0deg) as 355
+        // degrees of travel backwards, not 5 forwards. That is the spin.
+        //
+        // Not gimbal lock, despite looking like one: this is a single
+        // rotation about one axis, so there is nothing to lock. It is the
+        // shortest-arc problem, and in 2D it is solved with arithmetic
+        // rather than with anything as heavy as a quaternion.
+        var turn = null;
+
         function label() {
-          var d = ((Math.round(+sl.value) % 360) + 360) % 360;
+          var raw = Math.round(+sl.value);
+          var d = ((raw % 360) + 360) % 360;
           var word = d === 0 ? ' up' : d === 180 ? ' down' : d === 90 ? ' right' : d === 270 ? ' left' : '';
           deg.textContent = sl.value + '°' + word;
-          arrow.style.transform = 'rotate(' + d + 'deg)';
+          if (turn === null) {
+            // The slider is already -180..180, which is the short way from
+            // straight up, so the first paint needs no correction.
+            turn = raw;
+          } else {
+            // Step by the signed difference in (-180, 180]: always the
+            // short way from wherever the arrow currently is.
+            var here = ((turn % 360) + 360) % 360;
+            turn += ((d - here) + 540) % 360 - 180;
+          }
+          arrow.style.transform = 'rotate(' + turn + 'deg)';
         }
         label();
         sl.addEventListener('input', function () {
