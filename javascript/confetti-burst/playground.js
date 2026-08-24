@@ -34,7 +34,11 @@ window.confettiPlayground = (function () {
     // 5 is the natural-looking rate; the multiplier is acceleration / 5.
     acceleration: 5,
     // 1 is off. Two or more repeats the whole set, loopGap apart.
-    loop: 1, loopGap: 700
+    //
+    // 2.5s rather than the renderer's own 700ms default: pieces live 9
+    // seconds here, and a gap that short lands every repeat inside the
+    // previous one, so the loop reads as a single long burst.
+    loop: 1, loopGap: 2500
   };
 
   // Mirrors confetti.js's own PAD aims, for the readout only. Kept as a
@@ -514,12 +518,38 @@ window.confettiPlayground = (function () {
     loopRow.appendChild(loopSl);
     pBurst.appendChild(loopRow);
 
+    // How far apart the repeats land. This has to be a control, not a
+    // constant: a piece lives `age` seconds, and any gap much shorter than
+    // that lands the next volley while the last one is still in full
+    // flight - four bursts merge into one continuous cloud and the Loop
+    // checkbox looks broken. It was fixed at 700ms against a 9s default
+    // age, which is exactly that.
+    var gapRow = el('div', 'cbp-ctl');
+    var gapLab = el('label', null);
+    var gapText = el('span', null, 'Repeat every');
+    var gapOut = el('output');
+    gapLab.appendChild(gapText);
+    gapLab.appendChild(gapOut);
+    var gapSl = document.createElement('input');
+    gapSl.type = 'range';
+    gapSl.min = 0.3; gapSl.max = 6; gapSl.step = 0.1;
+    gapSl.setAttribute('aria-label', 'Seconds between repeats');
+    gapRow.appendChild(gapLab);
+    gapRow.appendChild(gapSl);
+    pBurst.appendChild(gapRow);
+
     function syncLoop() {
       var on = S.loop > 1;
       loopBox.checked = on;
       loopSl.value = on ? S.loop : 3;
       loopSl.disabled = !on;
-      loopOut.textContent = on ? '×' + S.loop + ', ' + S.loopGap + 'ms apart' : 'fires once';
+      gapSl.value = S.loopGap / 1000;
+      gapSl.disabled = !on;
+      gapOut.textContent = (S.loopGap / 1000).toFixed(1) + ' s';
+      gapRow.style.opacity = on ? '' : '0.55';
+      loopOut.textContent = on
+        ? '×' + S.loop + ' over ' + (((S.loop - 1) * S.loopGap) / 1000).toFixed(1) + ' s'
+        : 'fires once';
     }
     loopBox.addEventListener('change', function () {
       S.loop = loopBox.checked ? Math.max(2, +loopSl.value || 3) : 1;
@@ -527,6 +557,10 @@ window.confettiPlayground = (function () {
     });
     loopSl.addEventListener('input', function () {
       S.loop = Math.max(2, Math.min(10, +loopSl.value));
+      syncLoop(); paint();
+    });
+    gapSl.addEventListener('input', function () {
+      S.loopGap = Math.round(Math.max(0.3, Math.min(6, +gapSl.value)) * 1000);
       syncLoop(); paint();
     });
     refs.syncLoop = syncLoop;
@@ -692,12 +726,65 @@ window.confettiPlayground = (function () {
           ? 'Using ' + f.name + '. Nothing is uploaded — it is read from your machine.'
           : bundled ? 'Using the bundled clip.' : 'Choose a file to hear anything.';
         if (f) useSound.checked = true;
+        decode(f || bundled);
         syncSound();
       });
+      // Decoded once, played many times.
+      //
+      // A fresh `new Audio(src)` per cannon looks right and is not: each
+      // one is a whole media element that fetches and decodes the clip
+      // again, and a row of five firing 200ms apart asks the browser for
+      // five simultaneous decodes of the same file. play() resolves for
+      // all of them - measured - and you still only hear the first few.
+      //
+      // Web Audio is the right primitive for short overlapping sounds:
+      // decode to a buffer once, then each play is a throwaway source node
+      // costing nothing. No element limit, no refetch, no decode latency.
+      var actx = null, buffer = null;
+
+      function audioCtx() {
+        if (!actx) {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) { try { actx = new AC(); } catch (e) { actx = null; } }
+        }
+        return actx;
+      }
+
+      function decode(source) {
+        buffer = null;
+        var c = audioCtx();
+        if (!c || !source) return;
+        // A File reads directly; a URL has to be fetched first, which
+        // fails on a file:// page - hence the Audio fallback below.
+        var bytes = (typeof File !== 'undefined' && source instanceof File && source.arrayBuffer)
+          ? source.arrayBuffer()
+          : (typeof fetch === 'function'
+              ? fetch(source).then(function (r) { return r.arrayBuffer(); })
+              : null);
+        if (!bytes) return;
+        bytes.then(function (b) { return c.decodeAudioData(b); })
+             .then(function (buf) { buffer = buf; }, function () { buffer = null; });
+      }
+
+      if (bundled) decode(bundled);
+
       refs.playSound = function () {
         if (!useSound.checked) return;
-        // A fresh Audio each time, so a second burst overlaps rather than
-        // restarting the first.
+        var c = audioCtx();
+        if (c && buffer) {
+          // Suspended until the page has been interacted with; by the time
+          // a cannon fires it has been, so this resolves immediately.
+          if (c.state === 'suspended' && c.resume) c.resume();
+          var src = c.createBufferSource();
+          src.buffer = buffer;
+          src.connect(c.destination);
+          src.start(0);
+          return;
+        }
+        // No Web Audio, or the clip could not be decoded (a file:// page
+        // cannot fetch its own bundled mp3). One element per play, which
+        // is where the "only the first few are audible" problem lives -
+        // but some sound beats none.
         new Audio(soundUrl).play().catch(function (e) {
           soundNote.textContent = 'The browser would not play it: ' + e.name + '.';
         });
