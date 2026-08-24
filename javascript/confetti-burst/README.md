@@ -111,6 +111,21 @@ dark makes the light pieces read as gaps in the burst rather than as
 colours. Swatches under the row show whichever palette is in hand, so you
 can see what you rolled without firing.
 
+The Saved setups panel carries a **built-in** look, `Natural`, that cannot
+be deleted — so there is always something known to come back to when a
+slider hunt has gone wrong. It was tuned against the panel's own readings
+rather than by eye: terminal fall 237 px/s, peak rise 764 px, 2% of launch
+speed left after a second, flutter 150–1247 px/s — inside every band the
+verdict checks, and centred in them rather than sitting on an edge.
+
+Its wide cone and heavy sway are doing work the renderer cannot. `spread`
+is applied **once, at launch**, and drag kills sideways velocity within
+about fifteen frames, so a burst stops widening almost immediately;
+`sway` is a sine applied to position, which wanders a piece around its
+path rather than away from it. Nothing in the model makes a burst keep
+spreading the way real paper does in moving air. Throwing the cone wider
+at launch is the closest approximation available.
+
 Each aim row carries a **Snap Angle 45°** button, drawn as the angle it
 makes. Off a multiple it jumps to the nearest one — 60° and 52° both give
 45° — and once on a multiple each further click advances: 45, 90, 135. It

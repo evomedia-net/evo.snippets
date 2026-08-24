@@ -83,6 +83,32 @@ window.confettiPlayground = (function () {
     'Centre': [13]
   };
 
+  // Built-in looks. Not the same thing as a saved setup: these ship with
+  // the snippet and cannot be deleted, so there is always something known
+  // to fall back to when a slider hunt has gone wrong.
+  //
+  // Natural was tuned against the panel's own readings rather than by eye
+  // - terminal fall 237 px/s, peak rise 764 px, 2% of launch speed left
+  // after a second, flutter 150-1247 px/s - which is inside every band the
+  // verdict checks, and centred in them rather than sitting on an edge.
+  //
+  // The wide cone and the heavy sway are doing the work the renderer
+  // cannot: `spread` is applied once at launch and drag kills sideways
+  // velocity within about fifteen frames, so a burst stops widening almost
+  // immediately. Throwing the cone wider at launch and leaning on sway is
+  // the closest this model gets to air that keeps working on the paper.
+  var LOOKS = {
+    Natural: {
+      // gravityBase is pinned as well as gravity. The panel's "Gravity"
+      // slider drives gravityBase, so a look that set only `gravity` would
+      // inherit whatever the last hunt left behind and stop matching the
+      // readings it was tuned against.
+      velocity: 52, gravity: 0.85, gravityBase: 0.22,
+      dragFace: 0.925, dragEdge: 0.991,
+      tumble: 1.25, spread: 90, sway: 2.5, age: 12, acceleration: 5
+    }
+  };
+
   var STORE = 'confettiPlaygroundPresets';
 
   // Palettes the panel writes rather than reads. A preset naming one of
@@ -868,7 +894,24 @@ window.confettiPlayground = (function () {
     var saveB = el('button', 'cbp-btn cbp-btn--go cbp-btn--sm', 'Save');
     saveB.type = 'button';
     preRow2.appendChild(saveB);
+    var lookRow = el('div', 'cbp-row');
+    lookRow.appendChild(el('span', 'cbp-aim-deg', 'Built in'));
+    Object.keys(LOOKS).forEach(function (name) {
+      var b = el('button', 'cbp-btn cbp-btn--sm', name);
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        Object.keys(LOOKS[name]).forEach(function (k) {
+          if (k in S) S[k] = LOOKS[name][k];
+        });
+        syncSliders();
+        paint();
+        preNote.textContent = 'Loaded the built-in “' + name + '” look.';
+      });
+      lookRow.appendChild(b);
+    });
+
     var preNote = el('p', 'cbp-hint', 'Kept in this browser only.');
+    pPre.appendChild(lookRow);
     pPre.appendChild(preRow1);
     pPre.appendChild(preRow2);
     pPre.appendChild(preNote);
