@@ -34,7 +34,11 @@ window.confettiPlayground = (function () {
     // 5 is the natural-looking rate; the multiplier is acceleration / 5.
     acceleration: 5,
     // 1 is off. Two or more repeats the whole set, loopGap apart.
-    loop: 1, loopGap: 700
+    //
+    // 2.5s rather than the renderer's own 700ms default: pieces live 9
+    // seconds here, and a gap that short lands every repeat inside the
+    // previous one, so the loop reads as a single long burst.
+    loop: 1, loopGap: 2500
   };
 
   // Mirrors confetti.js's own PAD aims, for the readout only. Kept as a
@@ -128,6 +132,25 @@ window.confettiPlayground = (function () {
       out.push(hslHex((start + i * 60 + (Math.random() - 0.5) * 26 + 360) % 360, sat, light));
     }
     return out;
+  }
+
+  // Where a click on Snap 45 should land.
+  //
+  // Off a multiple, it goes to the NEAREST one - 60 and 52 both give 45,
+  // which is the point: 45 is the angle people actually want and the
+  // slider is a clumsy way to hit it. Already on a multiple, it advances
+  // to the next, so repeated clicks walk 45, 90, 135 rather than sticking.
+  //
+  // No click counter anywhere: landing on a multiple IS the state, so the
+  // second click behaves differently because the world changed, not
+  // because something remembered.
+  function snap45(deg) {
+    var v = (Math.abs(deg % 45) < 0.5) ? deg + 45 : Math.round(deg / 45) * 45;
+    // Back into (-180, 180], the range the slider speaks. 180 is left
+    // alone rather than folded to -180, which would look like a click
+    // that did nothing.
+    v = ((v % 360) + 360) % 360;
+    return v > 180 ? v - 360 : v;
   }
 
   function rgbOf(hex) {
@@ -434,6 +457,19 @@ window.confettiPlayground = (function () {
         // "-105°" is a number you have to convert; an arrow is the answer.
         // Drawn pointing up, because up is 0 on the compass the aim uses,
         // so the rotation is the bearing with no conversion in between.
+        // Snap to 45. Drawn as the thing it does - a baseline, a ray at
+        // 45 degrees off it, and the arc between them - because a button
+        // that looks like its own result needs no reading.
+        var snap = el('button', 'cbp-aim-snap');
+        snap.type = 'button';
+        snap.title = 'Snap Angle 45°';
+        snap.setAttribute('aria-label', 'Snap the aim to the next 45 degrees');
+        snap.innerHTML =
+          '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+          '<path d="M4 19H20M4 19L17 6"/>' +
+          '<path class="cbp-aim-snap-arc" d="M12 19A8 8 0 0 0 9.66 13.34"/>' +
+          '</svg>';
+
         var arrow = el('span', 'cbp-aim-arrow');
         arrow.setAttribute('aria-hidden', 'true');
         arrow.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 21V4M12 3l-6 7M12 3l6 7"/></svg>';
@@ -442,11 +478,35 @@ window.confettiPlayground = (function () {
         sl.value = Math.round(aimOf(c));
         sl.setAttribute('aria-label', 'Aim for position ' + c.at);
         var deg = el('span', 'cbp-aim-deg');
+        // Where the arrow is actually pointing, UNWRAPPED - it keeps
+        // counting past 360 and below 0 rather than being folded back into
+        // a circle. The bearing itself wraps, and if the transform wrapped
+        // with it the arrow would take the long way round: -5 normalises to
+        // 355, and CSS interpolates rotate(355deg) -> rotate(0deg) as 355
+        // degrees of travel backwards, not 5 forwards. That is the spin.
+        //
+        // Not gimbal lock, despite looking like one: this is a single
+        // rotation about one axis, so there is nothing to lock. It is the
+        // shortest-arc problem, and in 2D it is solved with arithmetic
+        // rather than with anything as heavy as a quaternion.
+        var turn = null;
+
         function label() {
-          var d = ((Math.round(+sl.value) % 360) + 360) % 360;
+          var raw = Math.round(+sl.value);
+          var d = ((raw % 360) + 360) % 360;
           var word = d === 0 ? ' up' : d === 180 ? ' down' : d === 90 ? ' right' : d === 270 ? ' left' : '';
           deg.textContent = sl.value + '°' + word;
-          arrow.style.transform = 'rotate(' + d + 'deg)';
+          if (turn === null) {
+            // The slider is already -180..180, which is the short way from
+            // straight up, so the first paint needs no correction.
+            turn = raw;
+          } else {
+            // Step by the signed difference in (-180, 180]: always the
+            // short way from wherever the arrow currently is.
+            var here = ((turn % 360) + 360) % 360;
+            turn += ((d - here) + 540) % 360 - 180;
+          }
+          arrow.style.transform = 'rotate(' + turn + 'deg)';
         }
         label();
         sl.addEventListener('input', function () {
@@ -455,6 +515,13 @@ window.confettiPlayground = (function () {
           listInput.value = text();
           readings();
         });
+        snap.addEventListener('click', function () {
+          sl.value = String(snap45(parseFloat(sl.value)));
+          // Same path the slider takes, so the arrow, the readout, the
+          // positions field and the readings all move together.
+          sl.dispatchEvent(new Event('input'));
+        });
+        row.appendChild(snap);
         row.appendChild(arrow);
         row.appendChild(sl);
         row.appendChild(deg);
@@ -490,12 +557,38 @@ window.confettiPlayground = (function () {
     loopRow.appendChild(loopSl);
     pBurst.appendChild(loopRow);
 
+    // How far apart the repeats land. This has to be a control, not a
+    // constant: a piece lives `age` seconds, and any gap much shorter than
+    // that lands the next volley while the last one is still in full
+    // flight - four bursts merge into one continuous cloud and the Loop
+    // checkbox looks broken. It was fixed at 700ms against a 9s default
+    // age, which is exactly that.
+    var gapRow = el('div', 'cbp-ctl');
+    var gapLab = el('label', null);
+    var gapText = el('span', null, 'Repeat every');
+    var gapOut = el('output');
+    gapLab.appendChild(gapText);
+    gapLab.appendChild(gapOut);
+    var gapSl = document.createElement('input');
+    gapSl.type = 'range';
+    gapSl.min = 0.3; gapSl.max = 6; gapSl.step = 0.1;
+    gapSl.setAttribute('aria-label', 'Seconds between repeats');
+    gapRow.appendChild(gapLab);
+    gapRow.appendChild(gapSl);
+    pBurst.appendChild(gapRow);
+
     function syncLoop() {
       var on = S.loop > 1;
       loopBox.checked = on;
       loopSl.value = on ? S.loop : 3;
       loopSl.disabled = !on;
-      loopOut.textContent = on ? '×' + S.loop + ', ' + S.loopGap + 'ms apart' : 'fires once';
+      gapSl.value = S.loopGap / 1000;
+      gapSl.disabled = !on;
+      gapOut.textContent = (S.loopGap / 1000).toFixed(1) + ' s';
+      gapRow.style.opacity = on ? '' : '0.55';
+      loopOut.textContent = on
+        ? '×' + S.loop + ' over ' + (((S.loop - 1) * S.loopGap) / 1000).toFixed(1) + ' s'
+        : 'fires once';
     }
     loopBox.addEventListener('change', function () {
       S.loop = loopBox.checked ? Math.max(2, +loopSl.value || 3) : 1;
@@ -503,6 +596,10 @@ window.confettiPlayground = (function () {
     });
     loopSl.addEventListener('input', function () {
       S.loop = Math.max(2, Math.min(10, +loopSl.value));
+      syncLoop(); paint();
+    });
+    gapSl.addEventListener('input', function () {
+      S.loopGap = Math.round(Math.max(0.3, Math.min(6, +gapSl.value)) * 1000);
       syncLoop(); paint();
     });
     refs.syncLoop = syncLoop;
@@ -668,12 +765,65 @@ window.confettiPlayground = (function () {
           ? 'Using ' + f.name + '. Nothing is uploaded — it is read from your machine.'
           : bundled ? 'Using the bundled clip.' : 'Choose a file to hear anything.';
         if (f) useSound.checked = true;
+        decode(f || bundled);
         syncSound();
       });
+      // Decoded once, played many times.
+      //
+      // A fresh `new Audio(src)` per cannon looks right and is not: each
+      // one is a whole media element that fetches and decodes the clip
+      // again, and a row of five firing 200ms apart asks the browser for
+      // five simultaneous decodes of the same file. play() resolves for
+      // all of them - measured - and you still only hear the first few.
+      //
+      // Web Audio is the right primitive for short overlapping sounds:
+      // decode to a buffer once, then each play is a throwaway source node
+      // costing nothing. No element limit, no refetch, no decode latency.
+      var actx = null, buffer = null;
+
+      function audioCtx() {
+        if (!actx) {
+          var AC = window.AudioContext || window.webkitAudioContext;
+          if (AC) { try { actx = new AC(); } catch (e) { actx = null; } }
+        }
+        return actx;
+      }
+
+      function decode(source) {
+        buffer = null;
+        var c = audioCtx();
+        if (!c || !source) return;
+        // A File reads directly; a URL has to be fetched first, which
+        // fails on a file:// page - hence the Audio fallback below.
+        var bytes = (typeof File !== 'undefined' && source instanceof File && source.arrayBuffer)
+          ? source.arrayBuffer()
+          : (typeof fetch === 'function'
+              ? fetch(source).then(function (r) { return r.arrayBuffer(); })
+              : null);
+        if (!bytes) return;
+        bytes.then(function (b) { return c.decodeAudioData(b); })
+             .then(function (buf) { buffer = buf; }, function () { buffer = null; });
+      }
+
+      if (bundled) decode(bundled);
+
       refs.playSound = function () {
         if (!useSound.checked) return;
-        // A fresh Audio each time, so a second burst overlaps rather than
-        // restarting the first.
+        var c = audioCtx();
+        if (c && buffer) {
+          // Suspended until the page has been interacted with; by the time
+          // a cannon fires it has been, so this resolves immediately.
+          if (c.state === 'suspended' && c.resume) c.resume();
+          var src = c.createBufferSource();
+          src.buffer = buffer;
+          src.connect(c.destination);
+          src.start(0);
+          return;
+        }
+        // No Web Audio, or the clip could not be decoded (a file:// page
+        // cannot fetch its own bundled mp3). One element per play, which
+        // is where the "only the first few are audible" problem lives -
+        // but some sound beats none.
         new Audio(soundUrl).play().catch(function (e) {
           soundNote.textContent = 'The browser would not play it: ' + e.name + '.';
         });
