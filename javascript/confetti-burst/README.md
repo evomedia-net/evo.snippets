@@ -111,6 +111,26 @@ dark makes the light pieces read as gaps in the burst rather than as
 colours. Swatches under the row show whichever palette is in hand, so you
 can see what you rolled without firing.
 
+Each aim row carries a **Snap Angle 45°** button, drawn as the angle it
+makes. Off a multiple it jumps to the nearest one — 60° and 52° both give
+45° — and once on a multiple each further click advances: 45, 90, 135. It
+holds no click counter; being on a multiple *is* the state, so the second
+click behaves differently because the world changed rather than because
+something remembered.
+
+Loop has a **Repeat every** control beside it. It has to be a control
+rather than a constant: pieces live `age` seconds, so any gap much shorter
+than that merges the volleys into one continuous cloud and the checkbox
+looks broken.
+
+Sound is decoded **once** into a Web Audio buffer and each play is a
+throwaway source node. A fresh `new Audio(src)` per cannon looks equivalent
+and is not — every one is a media element that fetches and decodes the clip
+again, and a row of five firing 200 ms apart asks for five simultaneous
+decodes of the same file. `play()` resolves for all of them and you still
+hear only the first few. The Audio path remains as a fallback for a
+`file://` page, which cannot fetch its own bundled clip.
+
 Below it, a 3 × 2 grid of **your own six colours**. Each cell opens the
 OS colour picker, then wears the colour it holds and prints its hex — the
 control and the readout are the same object, so there is nothing else to
@@ -185,7 +205,7 @@ MIT licence. See [NOTICE.md](NOTICE.md) before shipping it anywhere.
 | `gravity` | `1` | multiplier on the built-in constant |
 | `acceleration` | `5` | how fast the launch speed bleeds off, on a 1–10 scale where **5 is the natural-looking rate**. The multiplier is `acceleration / 5`, so `2.5` is half the pull and `7.5` half again as much. It scales `gravity` rather than replacing it — `gravity` is the raw constant, this is the dial. `1` is the floor because `0` is not a slow burst, it is no fall at all. Note the *rise* is drag-limited on this renderer, so the peak height moves about 27% across the whole range while the **fall speed** changes a great deal |
 | `loop` | `1` | fire the same burst again, up to `10` times. Clamped, because a runaway loop is a browser you have to kill |
-| `loopDelay` | `700` | milliseconds between repeats |
+| `loopDelay` | `700` | milliseconds between repeats. Worth setting deliberately: a gap much shorter than `age` lands each volley inside the last one, and the loop reads as a single long burst rather than as repeats. The playground defaults it to `2500` against its 9-second `age` for exactly that reason |
 | `age` | `9` | seconds a piece lives. Most leave the bottom of the screen well before this, so it mainly governs the ones that drift |
 | `scalar` | `1` | size multiplier |
 | `drift` | `0` | a steady sideways push, for wind |
