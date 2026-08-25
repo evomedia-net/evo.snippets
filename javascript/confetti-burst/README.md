@@ -217,8 +217,51 @@ document.getElementById('celebrate').addEventListener('click', function () {
 `evo.confetti.html` has a **Use sound** checkbox and a file picker, so you can try it
 with the bundled clip or any audio file on your machine — nothing is uploaded.
 
-`confetti.mp3` is third-party content and **not** covered by this repository's
-MIT licence. See [NOTICE.md](NOTICE.md) before shipping it anywhere.
+`confetti.mp3` is **Sound Effect by u_jspnqv1glx from
+[Pixabay](https://pixabay.com/sound-effects/search/confetti/)** — attribution is
+not required by that licence, and is given anyway. It is third-party content and
+**not** covered by this repository's MIT licence. See [NOTICE.md](NOTICE.md)
+before shipping it anywhere.
+
+### One cheer, many pops
+
+The bundled clip is two sounds with a silent gap between them — a pop peaking at
+0.20s and decayed by 0.56s, silence to 0.78s, then a crowd until it fades out
+around 4.8s. Played whole on every cannon, ten cannons give you ten overlapping
+crowds.
+
+Decode once and play a slice, rather than cutting the file in two:
+
+```js
+const ctx = new AudioContext();
+let clip = null;
+fetch('confetti.mp3')
+  .then((r) => r.arrayBuffer())
+  .then((b) => ctx.decodeAudioData(b))
+  .then((buf) => { clip = buf; });
+
+function play(seconds) {          // omit seconds for the whole clip
+  if (!clip) return;
+  if (ctx.state === 'suspended') ctx.resume();
+  const src = ctx.createBufferSource();
+  src.buffer = clip;
+  src.connect(ctx.destination);
+  seconds ? src.start(0, 0, seconds) : src.start(0);
+}
+
+positions.forEach((at, i) => {
+  setTimeout(() => {
+    confettiBurst({ origin: at });
+    play(i === 0 ? null : 0.62);  // one cheer, then pops
+  }, i * 150);
+});
+```
+
+Decoding once also avoids the *"only the first few are audible"* problem that
+comes from creating an `<audio>` element per cannon.
+
+`evo.confetti.html` does exactly this, and its **Per cannon** and **Pop ends**
+controls are there so you can find the split point for a clip of your own.
 
 ## Options
 
