@@ -375,3 +375,37 @@
 @media (prefers-reduced-motion: reduce) {
   .cbp * { transition: none !important; }
 }
+
+/* ── the floating Fire button ────────────────────────────────────────────
+   Shown only while the panel's own Fire button is off screen, so it is never
+   a second copy of a control you can already see. Centred at the bottom
+   rather than in a corner: the panel is a full-width column, and a corner
+   button on a phone sits under the thumb that is dragging the sliders.
+
+   env(safe-area-inset-bottom) keeps it clear of the iOS home indicator. */
+.cbp-fire-float {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  padding: 0.6rem 1.9rem;
+  font-size: 0.95rem;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+
+.cbp-fire-float[hidden] {
+  display: none;
+}
+
+/* A pointer-driven lift is noise for anyone who asked for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .cbp-fire-float {
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .cbp-fire-float:hover {
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  }
+}
