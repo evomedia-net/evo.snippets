@@ -41,7 +41,7 @@ Needs Python 3.9+ on PATH. The launchers pick the first available `python`,
 | [confetti-burst](javascript/confetti-burst/) | A confetti burst that falls like paper rather than sparks &mdash; air drag, tumble-driven flutter, and a numpad grid of firing positions |
 
 Needs a browser. No runtime to install and nothing to serve: open the
-snippet's `demo.html` and it runs.
+snippet's `evo.confetti.html` and it runs.
 
 ### typescript
 

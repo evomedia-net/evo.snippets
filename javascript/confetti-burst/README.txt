@@ -10,7 +10,7 @@ confetti-burst
 A confetti burst that falls like paper. One file, no dependencies, no build
 step, no framework.
 
-Open demo.html in a browser to see it. Nothing to install and nothing to
+Open evo.confetti.html in a browser to see it. Nothing to install and nothing to
 serve — it is a file you double-click.
 
 Why it looks different
@@ -108,7 +108,7 @@ ten times:
 The playground
 --------------
 
-demo.html is a full control panel — every firing position, every force,
+evo.confetti.html is a full control panel — every firing position, every force,
 live readings, and the settings ready to paste back into code. Open it and
 play; nothing to install.
 
@@ -204,7 +204,7 @@ touched throws NotAllowedError every time. So sound is the caller's job:
       confettiBurst({ origin: 5 });
     });
 
-demo.html has a Use sound checkbox and a file picker, so you can try it
+evo.confetti.html has a Use sound checkbox and a file picker, so you can try it
 with the bundled clip or any audio file on your machine — nothing is uploaded.
 
 confetti.mp3 is third-party content and not covered by this repository's
