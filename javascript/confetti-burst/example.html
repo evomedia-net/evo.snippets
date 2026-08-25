@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>evo.confetti — example</title>
+    <!--
+      The smallest page that fires confetti, and the one the setup guide walks
+      through building. Two files in one folder:
+
+          confetti.js
+          example.html
+
+      Open it by double-clicking. There is no server to run and nothing to
+      build - the renderer is a plain script, so a page opened straight off
+      your computer works exactly like one on a website.
+
+      Copy this file, rename it, and start changing things.
+    -->
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #ffffff;
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+        color: #1a2d42;
+      }
+      button {
+        font: inherit;
+        font-size: 1.1rem;
+        font-weight: 600;
+        padding: 0.8rem 2.2rem;
+        color: #ffffff;
+        background: #336699;
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #3d73ad;
+      }
+      p {
+        margin: 1.5rem 0 0;
+        font-size: 0.85rem;
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+
+    <button type="button" id="fire">Fire</button>
+
+    <p>Click the button.</p>
+
+    <!-- Loads the confetti code. It has to come before the script that uses it. -->
+    <script src="confetti.js"></script>
+
+    <script>
+      // When the button with id="fire" is clicked, fire a burst.
+      document.getElementById('fire').addEventListener('click', function () {
+        confettiBurst();
+      });
+
+      // Try these instead - change one thing at a time:
+      //
+      //   confettiBurst({ count: 400 });          more pieces
+      //   confettiBurst({ origin: 13 });          from the middle of the screen
+      //   confettiBurst({ velocity: 25 });        thrown more gently
+      //   confettiBurst({ colors: ['#e11d48', '#f59e0b'] });   your own colours
+    </script>
+
+  </body>
+</html>

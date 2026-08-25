@@ -26,11 +26,17 @@
 window.confettiPlayground = (function () {
   'use strict';
 
-  // What the renderer ships, so "Reset" means something exact.
+  // Where the panel starts, and what "Reset" returns to. Deliberately not
+  // confetti.js's own defaults (count 140, velocity 34, tumble and sway
+  // untuned at 1) - those are the conservative numbers a page gets when it
+  // drops the renderer in with no options. This is the tuned look: more
+  // paper, thrown harder, with the tumble and sway pushed past neutral so
+  // the flutter is visible on the first burst rather than needing the
+  // sliders moved to find it.
   var DEFAULTS = {
-    count: 165, spread: 55, velocity: 48, scalar: 1.15, stagger: 500,
+    count: 205, spread: 55, velocity: 60, scalar: 1.15, stagger: 500,
     gravity: 0.8, gravityBase: 0.22, dragFace: 0.930, dragEdge: 0.985,
-    tumble: 1, sway: 1, age: 9,
+    tumble: 1.5, sway: 1.5, age: 9,
     // 5 is the natural-looking rate; the multiplier is acceleration / 5.
     acceleration: 5,
     // 1 is off. Two or more repeats the whole set, loopGap apart.
@@ -249,14 +255,26 @@ window.confettiPlayground = (function () {
 
     var opts = options || {};
     var S = Object.assign({}, DEFAULTS, opts.defaults || {});
-    var palette = opts.palette || 'Brand';
+    // The palette the panel opens on, kept separately because `palette` is
+    // reassigned on every pick and so cannot be its own restore point.
+    var DEFAULT_PALETTE = opts.palette || 'Brand';
+    var palette = DEFAULT_PALETTE;
     var palettes = Object.assign({}, opts.palettes || PALETTES);
     // {at, dir} - dir null means "use the position's own aim", which is
     // what lets one cannon be turned without disturbing the others.
     // The bottom row - 21, 23, 25 - which is where 1, 3, 5 pointed before
     // the pad was flipped to phone order. Confetti rising from below the
     // bottom edge is the shape the panel should open on.
-    var cannons = [{ at: 21, dir: null }, { at: 23, dir: null }, { at: 25, dir: null }];
+    // The positions the panel opens on, and the ones Reset returns to. Named
+    // once because they used to be written twice and the copies disagreed:
+    // Reset installed 1, 2, 3 - the top-left corner, a state the page never
+    // starts in and a poor default for confetti, since it drops the burst out
+    // of the ceiling in a corner rather than throwing it up from the floor.
+    var DEFAULT_CANNONS = [21, 23, 25];
+    function defaultCannons() {
+      return DEFAULT_CANNONS.map(function (n) { return { at: n, dir: null }; });
+    }
+    var cannons = defaultCannons();
 
     host.classList.add('cbp');
     var grid = el('div', 'cbp-grid');
@@ -276,7 +294,11 @@ window.confettiPlayground = (function () {
         gravity: S.gravityBase, dragFace: S.dragFace,
         dragEdge: S.dragEdge, tumble: S.tumble, sway: S.sway
       };
-      var per = Math.max(5, Math.round(S.count / cannons.length));
+      // Per cannon, not a budget split between them. Dividing meant every
+      // position you added made every burst weaker - the opposite of what
+      // adding a cannon should do - while the slider went on reading 300.
+      // The number on the control now describes what one cannon fires.
+      var per = S.count;
       cannons.forEach(function (c, i) {
         setTimeout(function () {
           var call = {
@@ -298,8 +320,9 @@ window.confettiPlayground = (function () {
         }, i * S.stagger);
       });
       status(cannons.length === 1
-        ? 'Fired from position ' + cannons[0].at + '.'
-        : cannons.length + ' cannons, ' + S.stagger + 'ms apart.');
+        ? 'Fired from position ' + cannons[0].at + '. ' + S.count + ' pieces.'
+        : cannons.length + ' cannons, ' + S.stagger + 'ms apart. '
+          + S.count + ' pieces each, ' + (cannons.length * S.count) + ' in the air.');
     }
 
     function status(msg) { if (refs.status) refs.status.textContent = msg; }
@@ -356,7 +379,7 @@ window.confettiPlayground = (function () {
       }).join(', ');
       return 'confettiBurst({\n' +
         '  origin: ' + (cannons.length === 1 ? cannons[0].at : '/* one of */ ' + list) + ',\n' +
-        '  count: ' + Math.max(5, Math.round(S.count / Math.max(1, cannons.length))) + ',\n' +
+        '  count: ' + S.count + ',\n' +
         '  spread: ' + S.spread + ',\n' +
         '  velocity: ' + S.velocity + ',\n' +
         '  gravity: ' + (+S.gravity).toFixed(2) + ',\n' +
@@ -1012,7 +1035,12 @@ window.confettiPlayground = (function () {
     resetB.type = 'button';
     resetB.addEventListener('click', function () {
       S = Object.assign({}, DEFAULTS, opts.defaults || {});
-      cannons = [{ at: 1, dir: null }, { at: 2, dir: null }, { at: 3, dir: null }];
+      cannons = defaultCannons();
+      // Palette was never restored here. A preset saves {S, cannons, palette},
+      // so the panel already counts it as part of the state - leaving it out
+      // meant Reset changed the numbers, kept the colours, and still said it
+      // had gone back to the shipped settings.
+      selectPalette(DEFAULT_PALETTE);
       syncSliders();
       paint();
       status('Back to the shipped settings.');
