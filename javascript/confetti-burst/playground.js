@@ -319,7 +319,21 @@ window.confettiPlayground = (function () {
           // Per cannon, not per press: a row of five going off in
           // sequence should sound like five, and a loop should sound
           // like it is still running rather than like one long silence.
-          if (refs.playSound) refs.playSound(i === 0);
+          // The repeats need their own sounds. `loop` is handled inside the
+          // renderer, which re-fires on its own timer and knows nothing about
+          // audio - so a looping burst went silent after the first round while
+          // confetti kept appearing. These mirror the renderer's schedule
+          // exactly - loops clamped 1-10, gap floored at 60ms, the same
+          // arithmetic as confetti.js - because a sound landing on a different
+          // beat from the paper is worse than no sound at all.
+          if (refs.playSound) {
+            refs.playSound(i === 0);
+            var loops = Math.max(1, Math.min(10, Math.round(+S.loop || 1)));
+            var gap = Math.max(60, +S.loopGap || 700);
+            for (var L = 1; L < loops; L++) {
+              setTimeout(function () { refs.playSound(false); }, gap * L);
+            }
+          }
           // Omitted rather than sent as null, so the renderer falls back
           // to the position's own aim instead of reading null as a bearing.
           if (c.dir !== null) call.direction = c.dir;
