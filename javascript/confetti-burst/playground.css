@@ -388,7 +388,9 @@
   left: 50%;
   transform: translateX(-50%);
   bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-  z-index: 40;
+  /* Above the host page's own layers. This site stacks to 300, and at 40 the
+     page content simply drew over the button. */
+  z-index: 500;
   padding: 0.6rem 1.9rem;
   font-size: 0.95rem;
   border-radius: 999px;

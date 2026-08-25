@@ -1068,17 +1068,67 @@ window.confettiPlayground = (function () {
       floatB.hidden = true;
       floatB.setAttribute('aria-label', 'Fire confetti');
       floatB.addEventListener('click', function () { fire(); });
-      document.body.appendChild(floatB);
+      // Mounted inside the host, not on <body>. The panel's colours come from
+      // --cbp-* variables scoped to .cbp and overridden by the host page, so a
+      // button parked on <body> is outside that scope: --cbp-accent resolved to
+      // nothing and the background computed rgba(0,0,0,0) - an invisible button
+      // with text showing through it. position:fixed still pins it to the
+      // viewport from here, since nothing above it establishes a containing
+      // block.
+      host.appendChild(floatB);
 
       function panelOnScreen() {
         var r = host.getBoundingClientRect();
         return r.bottom > 0 && r.top < (window.innerHeight || 0);
       }
 
+      // A sticky or fixed header hides content behind it, but the viewport
+      // does not know that: IntersectionObserver still counts the panel's Fire
+      // button as visible while it sits underneath one. That left a stretch of
+      // scrolling with the real button covered and the floating one not yet
+      // shown - no usable Fire button at all.
+      //
+      // So the root box is shrunk at the top by whatever is pinned there.
+      // Measured rather than configured, because this ships into other
+      // people's pages and their header is not ours to know. opts.topInset
+      // overrides it when the guess is wrong.
+      function topInset() {
+        if (typeof opts.topInset === 'number') return opts.topInset;
+        var max = 0;
+        var all = document.body ? document.body.getElementsByTagName('*') : [];
+        for (var i = 0; i < all.length; i++) {
+          var el = all[i];
+          if (el === floatB || host.contains(el)) continue;
+          var cs = window.getComputedStyle(el);
+          if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+          var r = el.getBoundingClientRect();
+          // Pinned across the top: full-width enough to cover, and sitting at
+          // the top edge rather than merely stuck somewhere further down.
+          if (!r.height || r.width < window.innerWidth * 0.5) continue;
+          if (r.top > 8) continue;
+          if (r.bottom > max) max = r.bottom;
+        }
+        return Math.round(max);
+      }
+
       if (typeof IntersectionObserver === 'function') {
-        new IntersectionObserver(function (entries) {
-          floatB.hidden = entries[0].isIntersecting || !panelOnScreen();
-        }, { threshold: 0 }).observe(fireB);
+        var fireWatch = null;
+        function watchFire() {
+          if (fireWatch) fireWatch.disconnect();
+          fireWatch = new IntersectionObserver(function (entries) {
+            floatB.hidden = entries[0].isIntersecting || !panelOnScreen();
+          }, { threshold: 0, rootMargin: '-' + topInset() + 'px 0px 0px 0px' });
+          fireWatch.observe(fireB);
+        }
+        watchFire();
+
+        // Header heights change with the viewport, so the inset is re-measured
+        // rather than taken once at mount.
+        var resizeT = null;
+        window.addEventListener('resize', function () {
+          clearTimeout(resizeT);
+          resizeT = setTimeout(watchFire, 150);
+        });
 
         // Hidden when the panel itself is gone, so it never floats over an
         // unrelated part of a page that mounts this among other content.
