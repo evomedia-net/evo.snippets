@@ -14,6 +14,10 @@ Written for the case where a form field carries a character counter with a cap
 that is too generous, and you need to find every place that cap is set: the
 markup, the client validator, the server validator, and the column.
 
+[**INSTALL.md**](INSTALL.md) is a step-by-step setup guide that assumes no prior
+experience with Python: check your version, run one command, read the result.
+Everything below is the reference.
+
 ## Run it
 
 ```bash
