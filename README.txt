@@ -1,13 +1,15 @@
+<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · dev@evomedia.net
 Licensed under the MIT License. See LICENSE.
+-->
 
 Evomedia.net Snippets
 =====================
 
 Small, self-contained tools that solve one problem well and run anywhere. Each
 snippet is a folder you can copy into a project, or run in place against any
-codebase - no install step, no framework, no shared runtime between them.
+codebase — no install step, no framework, no shared runtime between them.
 
 Layout
 ------
@@ -17,7 +19,7 @@ what the snippet does:
 
     <language>/<what-it-does>/
 
-A snippet's language folder is about its runtime, not its reach - the Python
+A snippet's language folder is about its runtime, not its reach — the Python
 tool below scans TypeScript, PHP, Go, and Java codebases just fine, and the
 JavaScript one needs only a browser you already have.
 
@@ -29,7 +31,7 @@ python
 
 | Snippet | What it does |
 | --- | --- |
-| find-oversized-input-limits (python/find-oversized-input-limits/) | Finds every declared user-input character limit above a threshold, across every common fullstack - HTML, React, Angular, Django, Pydantic, Zod, Laravel, Rails, Go, Spring, .NET, SQL |
+| find-oversized-input-limits (python/find-oversized-input-limits/) | Finds every declared user-input character limit above a threshold, across every common fullstack — HTML, React, Angular, Django, Pydantic, Zod, Laravel, Rails, Go, Spring, .NET, SQL |
 
 Needs Python 3.9+ on PATH. The launchers pick the first available python,
 python3, or py.
@@ -42,18 +44,18 @@ javascript
 | confetti-burst (javascript/confetti-burst/) | A confetti burst that falls like paper rather than sparks &mdash; air drag, tumble-driven flutter, and a numpad grid of firing positions |
 
 Needs a browser. No runtime to install and nothing to serve: open the
-snippet's demo.html and it runs.
+snippet's evo.confetti.html and it runs.
 
 typescript
 ----------
 
 | Snippet | What it does |
 | --- | --- |
-| find-oversized-input-limits (typescript/find-oversized-input-limits/) | The same scanner, same flags, byte-identical output - for machines with Node but no Python |
+| find-oversized-input-limits (typescript/find-oversized-input-limits/) | The same scanner, same flags, byte-identical output — for machines with Node but no Python |
 
-Needs Node 22.6+. Node runs TypeScript directly from 23.6 on; 22.6-23.5 gets
+Needs Node 22.6+. Node runs TypeScript directly from 23.6 on; 22.6–23.5 gets
 --experimental-strip-types added by the launchers. No build step, no
-package.json - the .ts file is the program.
+package.json — the .ts file is the program.
 
 Twins
 -----
@@ -63,7 +65,7 @@ identical**, not merely similar: same rules, same flags, same exit codes, and
 byte-identical output verified by diffing both across every mode. Pick by what
 your machine already has installed, not by what the snippet can do.
 
-That guarantee is load-bearing enough to shape the code - the TypeScript twin
+That guarantee is load-bearing enough to shape the code — the TypeScript twin
 sorts with a codepoint comparator rather than localeCompare specifically so
 its ordering matches Python's sorted().
 
@@ -85,7 +87,7 @@ all of them:
 License
 -------
 
-MIT - see LICENSE (LICENSE). Use them, fork them, ship them in your own work.
+MIT — see LICENSE (LICENSE). Use them, fork them, ship them in your own work.
 
 Checks
 ------
@@ -99,15 +101,15 @@ CI runs it on every push to main and every pull request
 required check on main - a pull request with a red run cannot merge.
 
 It refuses any tracked file that contains a path from a developer's own
-machine - a drive-letter path, a WSL mount, a Windows profile directory. Usage examples use
-C:\path\to\project or /path/to/project instead - an example that only
+machine — a drive-letter path, a WSL mount, a Windows profile directory. Usage examples use
+C:\path\to\project or /path/to/project instead — an example that only
 works on the author's disk is an example that works nowhere.
 
 Contact
 -------
 
-Kelly Michels - dev@evomedia.net (mailto:dev@evomedia.net) -
+Kelly Michels · dev@evomedia.net (mailto:dev@evomedia.net) ·
 evomedia.net (https://evomedia.net)
 
 Issues and pull requests are welcome. If a snippet misses a pattern in a stack
-you use, that is worth reporting - coverage breadth is the whole point.
+you use, that is worth reporting — coverage breadth is the whole point.

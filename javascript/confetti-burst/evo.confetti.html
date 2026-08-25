@@ -4,14 +4,18 @@
   Created by Kelly Michels - dev@evomedia.net
   Licensed under the MIT License. See LICENSE.
 
+  The full control panel: every firing position, every force, live readouts
+  and a copyable snippet of whatever you have tuned.
+
   Open this file in a browser. Nothing to install, nothing to serve.
+  example.html is the two-line version if that is all you need.
 -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>confetti-burst — demo</title>
+<title>evo.confetti — the full control panel</title>
 <link rel="stylesheet" href="playground.css">
 <style>
   :root {
@@ -38,6 +42,14 @@
   }
   main { width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 18px; }
   h1 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark { width: 30px; height: 30px; flex: none; border-radius: 7px; }
+  /* The evo. prefix carries the family, the name carries the weight - the same
+     treatment the other evo.* products use. */
+  .brand-evo { color: var(--accent); }
+  .site-credit { font-size: 13px; color: var(--muted); text-align: center; }
+  .site-credit a { color: var(--muted); }
+  .site-credit a:hover { color: var(--accent); }
   p { margin: 0; color: var(--muted); }
   .card {
     background: var(--panel); border: 1px solid var(--line);
@@ -70,7 +82,17 @@
 <body>
 <main>
   <div>
-    <h1>confetti-burst</h1>
+    <h1 class="brand">
+      <svg class="brand-mark" viewBox="0 0 64 64" role="img" aria-label="Evomedia.net">
+        <rect width="64" height="64" rx="15" fill="#003366"/>
+        <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M25 18H18v28h7"/>
+          <path d="M39 18h7v28h-7"/>
+        </g>
+        <circle cx="32" cy="32" r="5.5" fill="#7FB2E5"/>
+      </svg>
+      <span><span class="brand-evo">evo.</span>confetti</span>
+    </h1>
     <p>Paper falls slowly and flutters, because it is nearly all surface and
       almost no mass. This models that — drag, tumble, sway — rather than
       throwing dots on a ballistic arc.</p>
@@ -87,6 +109,11 @@
   confettiBurst({ origin: 3, direction: 315, count: 200 });
 &lt;/script&gt;</code></pre>
   </div>
+  <footer class="site-credit">
+    <a href="https://evomedia.net">evomedia.net</a> &middot;
+    <a href="https://github.com/evomedia-net/evo.snippets">evo.snippets on GitHub</a> &middot;
+    MIT licensed
+  </footer>
 </main>
 
 <script src="confetti.js"></script>
