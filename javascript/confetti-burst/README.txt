@@ -41,7 +41,10 @@ experience: two files in one folder, double-clicked, no server and no build
 step. example.html is the finished page it walks through building &mdash; a
 blank white page with one Fire button.
 
-Everything below is the reference.
+Everything below is the reference. MATH.md (MATH.md) has the derivations
+behind the fall: the drag ODE, why v *= drag is exact rather than an
+approximation, and the two places the renderer deliberately departs from the
+physics.
 
 Use
 ---

@@ -288,7 +288,7 @@ confettiBurst({ velocity: 25, acceleration: 7 });
 
 Real paper loses its speed almost immediately and then flutters down — that is
 the difference between confetti and sparks. There is a
-[write-up of the physics](https://evomedia.net/evo-confetti-math.html) if you are
+[write-up of the physics](MATH.md) if you are
 curious.
 
 ### It is slow, or my phone struggles
