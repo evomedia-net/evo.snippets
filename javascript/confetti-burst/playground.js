@@ -319,7 +319,7 @@ window.confettiPlayground = (function () {
           // Per cannon, not per press: a row of five going off in
           // sequence should sound like five, and a loop should sound
           // like it is still running rather than like one long silence.
-          if (refs.playSound) refs.playSound();
+          if (refs.playSound) refs.playSound(i === 0);
           // Omitted rather than sent as null, so the renderer falls back
           // to the position's own aim instead of reading null as a bearing.
           if (c.dir !== null) call.direction = c.dir;
@@ -774,6 +774,55 @@ window.confettiPlayground = (function () {
       picker.appendChild(filePick);
       pSnd.appendChild(picker);
 
+        // How the clip is used per cannon. Exposed rather than hardcoded: the
+        // panel had started doing something with sound that a caller reading
+        // the docs could not, which is the demo quietly outrunning the product.
+        // Every option here is something you can do yourself - see "Doing the
+        // sound yourself" in the README.
+        var modeRow = el('div', 'cbp-row');
+        modeRow.appendChild(el('span', 'cbp-aim-deg', 'Per cannon'));
+        var soundMode = document.createElement('select');
+        soundMode.setAttribute('aria-label', 'How the clip plays per cannon');
+        [['first', 'Pop, cheer on the first'],
+         ['pop', 'Pop only'],
+         ['full', 'Whole clip every time']].forEach(function (o) {
+          var opt = document.createElement('option');
+          opt.value = o[0];
+          opt.textContent = o[1];
+          soundMode.appendChild(opt);
+        });
+        modeRow.appendChild(soundMode);
+        pSnd.appendChild(modeRow);
+
+        // Where the pop ends in whatever clip is loaded. 0.62s suits the
+        // bundled one - it peaks at 0.20 and is silent from 0.56 - but a file
+        // you bring has its own shape, so this is yours to set rather than a
+        // constant only the demo knows.
+        var popRow = el('div', 'cbp-row');
+        popRow.appendChild(el('span', 'cbp-aim-deg', 'Pop ends'));
+        var popEnd = document.createElement('input');
+        popEnd.type = 'range';
+        popEnd.min = '0.1';
+        popEnd.max = '3';
+        popEnd.step = '0.02';
+        popEnd.value = '0.62';
+        popEnd.setAttribute('aria-label', 'How far into the clip the pop ends');
+        var popOut = el('span', 'cbp-out', '0.62 s');
+        popEnd.addEventListener('input', function () {
+          popOut.textContent = (+popEnd.value).toFixed(2) + ' s';
+        });
+        popRow.appendChild(popEnd);
+        popRow.appendChild(popOut);
+        pSnd.appendChild(popRow);
+
+        function syncSoundMode() {
+          var usesPop = soundMode.value !== 'full';
+          popRow.hidden = !usesPop;
+        }
+        soundMode.addEventListener('change', syncSoundMode);
+        syncSoundMode();
+
+
       var soundNote = el('p', 'cbp-hint',
         'Plays once per cannon, so a row of five sounds like five. Browsers ' +
         'refuse to play audio until the page has been interacted with, so ' +
@@ -864,7 +913,22 @@ window.confettiPlayground = (function () {
 
       if (bundled) decode(bundled);
 
-      refs.playSound = function () {
+        // The bundled clip is two sounds with a silent gap between them: a pop
+        // peaking at 0.20s and decayed by 0.56s, silence to 0.78s, then a crowd
+        // cheering until it fades out around 4.8s. Measured off the decoded
+        // samples rather than guessed - which is why 0.62 is the default where
+        // the pop ends, not a round number someone liked.
+        //
+        // A cheer per cannon would be sixteen overlapping crowds, so the
+        // default plays the whole clip on the first cannon and the pop alone
+        // after it. The select above makes that a choice rather than a
+        // behaviour only this page knows about.
+        //
+        // Sliced at playback rather than cut into two files: Web Audio's
+        // start() takes an offset and a duration, so there is no second asset
+        // to ship, no re-encoding, and the mp3 stays byte-identical to the copy
+        // in evo.snippets.
+        refs.playSound = function (isFirst) {
         if (!useSound.checked) return;
         var c = audioCtx();
         if (c && buffer) {
@@ -874,7 +938,16 @@ window.confettiPlayground = (function () {
           var src = c.createBufferSource();
           src.buffer = buffer;
           src.connect(c.destination);
-          src.start(0);
+            // "first" plays the whole clip once and the pop thereafter;
+            // "pop" never reaches the cheer; "full" is the old behaviour.
+            var popEnds = +popEnd.value;
+            var popOnly = soundMode.value === 'pop'
+              || (soundMode.value === 'first' && !isFirst);
+            if (popOnly && buffer.duration > popEnds) {
+              src.start(0, 0, popEnds);
+            } else {
+              src.start(0);
+            }
           return;
         }
         // No Web Audio, or the clip could not be decoded (a file:// page
