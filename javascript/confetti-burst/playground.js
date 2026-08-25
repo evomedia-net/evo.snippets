@@ -89,6 +89,11 @@ window.confettiPlayground = (function () {
     // then the other, so the burst reads as two columns climbing at once.
     // Order is firing order - the stagger walks the array.
     'Up both sides': [21, 25, 16, 20, 11, 15, 6, 10, 1, 5],
+    // A lap of the edge: along the bottom, up the right, back across the
+    // top, down the left. Exactly the 16 perimeter cells, each adjacent to
+    // the last, and 16 is adjacent to 21 - so with a loop on it the walk
+    // closes and keeps going round.
+    'Walk the screen': [21, 22, 23, 24, 25, 20, 15, 10, 5, 4, 3, 2, 1, 6, 11, 16],
     'Centre': [13]
   };
 
