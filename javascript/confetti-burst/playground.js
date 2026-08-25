@@ -1068,7 +1068,14 @@ window.confettiPlayground = (function () {
       floatB.hidden = true;
       floatB.setAttribute('aria-label', 'Fire confetti');
       floatB.addEventListener('click', function () { fire(); });
-      document.body.appendChild(floatB);
+      // Mounted inside the host, not on <body>. The panel's colours come from
+      // --cbp-* variables scoped to .cbp and overridden by the host page, so a
+      // button parked on <body> is outside that scope: --cbp-accent resolved to
+      // nothing and the background computed rgba(0,0,0,0) - an invisible button
+      // with text showing through it. position:fixed still pins it to the
+      // viewport from here, since nothing above it establishes a containing
+      // block.
+      host.appendChild(floatB);
 
       function panelOnScreen() {
         var r = host.getBoundingClientRect();
