@@ -1,5 +1,5 @@
 # Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-# Created by Kelly Michels · dev@evomedia.net
+# Created by Kelly Michels · kelly@evomedia.net
 # Licensed under the MIT License. See LICENSE.
 
 <#

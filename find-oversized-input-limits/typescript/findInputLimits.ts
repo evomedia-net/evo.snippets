@@ -1,5 +1,5 @@
 // Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-// Created by Kelly Michels · dev@evomedia.net
+// Created by Kelly Michels · kelly@evomedia.net
 // Licensed under the MIT License. See LICENSE.
 
 /**
@@ -12,7 +12,7 @@
  * Ruby on Rails, Go (validator tags, GORM), Java/Spring (Bean Validation, JPA),
  * C#/.NET (DataAnnotations, EF Core), raw SQL DDL, and JSON Schema / OpenAPI.
  *
- * This is the TypeScript twin of the Python snippet in ../../python. Same rules,
+ * This is the TypeScript twin of the Python snippet in ../python. Same rules,
  * same flags, same output — pick whichever runtime your machine already has.
  *
  * Requires Node 22.6+ (with --experimental-strip-types) or Node 23+, which runs

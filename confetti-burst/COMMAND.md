@@ -1,0 +1,182 @@
+<!--
+Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+Created by Kelly Michels · kelly@evomedia.net
+Licensed under the MIT License. See LICENSE.
+-->
+
+# evo.confetti — option reference
+
+Every option `confettiBurst()` takes, what it does, and a call you can paste.
+
+There is no command line here — the snippet is a browser script, so its
+"command" is the function. Load it and call it:
+
+```html
+<script src="confetti.js"></script>
+<script>
+  confettiBurst();
+</script>
+```
+
+Called with no argument it fires a sensible default burst. Every option below
+is optional, and you pass only the ones you want to change.
+
+```js
+confettiBurst({ count: 300, origin: 21, direction: 45 });
+```
+
+## How many, and how big
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `count` | `140` | Pieces in the burst. **Clamped to 1–2000.** Ask for more and it fires 2000 and says so in the console; ask for less than 1 and it fires 1. |
+| `scalar` | `1` | Size multiplier for every piece. `0.5` is confetti seen from across a room, `2` is oversized party paper. |
+| `roundRatio` | `0` | Fraction of pieces drawn as circles rather than rectangles, `0`–`1`. `0.3` mixes in a few dots. |
+
+```js
+confettiBurst({ count: 400 });                   a fuller burst
+confettiBurst({ count: 60, scalar: 1.8 });       fewer, larger pieces
+confettiBurst({ roundRatio: 0.35 });             a third of them round
+```
+
+`count` is the one option that can hang a page, which is why it is the one with
+hard bounds. 2000 is far above any real celebration and far below the point
+where the draw loop stops keeping up.
+
+## Where it fires from, and which way
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `origin` | `{ x: 0.5, y: 0.62 }` | Where the burst starts. Either fractions of the viewport (`0`–`1`, `{x: 0, y: 0}` being the top-left) or a **numpad number, 1–25**. |
+| `direction` | `0` | Aim as a compass: `0` up, `90` right, `180` down, `270` left. |
+| `angle` | — | The raw canvas angle, where `-90` is up. Still works, but `direction` wins if you pass both. Prefer `direction`. |
+| `spread` | `70` | Degrees of scatter either side of the aim. `10` is a tight jet, `180` is a hemisphere. |
+
+The numpad runs in **phone order** — `1` bottom-left, `13` centre, `21`
+top-left, `25` top-right:
+
+```
+    21 22 23 24 25
+    16 17 18 19 20
+    11 12 13 14 15
+     6  7  8  9 10
+     1  2  3  4  5
+```
+
+Each pad number carries its own aim as well as its position, because the two
+are not independent — a cannon in a top corner firing straight up is a cannon
+pointed off-screen. Pass `direction` and yours wins, so a pad number stays a
+shorthand rather than a preset. Half-steps work: `origin: 7.5` is halfway to
+the next cell.
+
+```js
+confettiBurst({ origin: 21 });                   from the top-left, aimed in
+confettiBurst({ origin: 13 });                   from the middle of the screen
+confettiBurst({ origin: { x: 0.5, y: 1 } });     from the bottom edge
+confettiBurst({ direction: 90, spread: 15 });    a tight jet to the right
+```
+
+## How it moves
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `velocity` | `34` | Launch speed, in pixels per frame at 60fps. Applied directly — no hidden multiplier between the number and the pixels it moves. |
+| `acceleration` | `5` | How fast the launch speed bleeds off, and so how high the burst peaks, on a `1`–`10` scale. The multiplier is `acceleration / 5`, so `2.5` is half and `7.5` half again as much. |
+| `gravity` | `1` | Multiplier on the fall constant. `acceleration` is the dial you normally reach for; this is the raw number underneath it. |
+| `drift` | `0` | A steady sideways push, as if there were a breeze. Negative blows left. |
+| `age` | `9` | Seconds before a piece expires. Most leave the bottom of the screen well before this, so it mostly governs the ones that drift. |
+
+`acceleration` floors at `1` rather than `0`, because `0` is not a slow burst —
+it is no fall at all, and the pieces coast off the top of the screen and stop
+being confetti.
+
+```js
+confettiBurst({ velocity: 60 });                 thrown harder
+confettiBurst({ velocity: 18 });                 tipped out rather than fired
+confettiBurst({ acceleration: 2.5 });            hangs in the air
+confettiBurst({ drift: 8 });                     a breeze from the left
+confettiBurst({ age: 20 });                      let the stragglers finish
+```
+
+## Colour
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `colors` | six-hue default | An array of CSS colours, handed out in order across the pieces. |
+
+Six or so hues, all of a similar lightness. Mixing a very light colour into a
+dark set makes those pieces read as gaps in the burst rather than as confetti.
+
+```js
+confettiBurst({ colors: ['#e11d48', '#f59e0b', '#facc15'] });
+```
+
+## Firing more than once
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `loop` | `1` | Fire the same burst this many times. **Clamped to 1–10.** |
+| `loopDelay` | `700` | Milliseconds between repeats. **Minimum 60.** |
+
+Clamped rather than trusted: a runaway loop on the page you are tuning is a
+browser you have to kill. The repeats drop `loop`, so they cannot schedule
+loops of their own.
+
+```js
+confettiBurst({ loop: 3, loopDelay: 400 });      three rounds, close together
+```
+
+## Two things it does on its own
+
+**Reduced motion.** If the visitor has `prefers-reduced-motion: reduce` set,
+the pieces are placed without tumble, spin or sway. The burst still happens —
+it simply stops moving in the ways that trigger motion sensitivity. You do not
+have to check for this yourself.
+
+**Idling.** The animation loop stops entirely once the last piece is gone,
+rather than running forever at zero cost to nothing. Fire again and it restarts.
+
+## Sound
+
+`confettiBurst()` has no sound option — it draws, and that is all. The audio in
+the demo page lives in `playground.js`, not in the renderer, so dropping
+`confetti.js` into your page never loads or plays anything.
+
+If you want a sound, play it yourself on the same click:
+
+```js
+button.addEventListener('click', function () {
+  confettiBurst({ origin: 21 });
+  document.getElementById('pop').play();
+});
+```
+
+## Tuning the physics live
+
+`window.confettiBurstTuning` overrides the per-frame constants, and nothing
+sets it by default. It is read once per frame, so changing a value moves
+confetti **already in the air** — which is what makes a tuning panel possible
+without a second copy of the renderer to drift out of step.
+
+| Key | Default | What it is |
+| --- | --- | --- |
+| `gravity` | `0.22` | The fall constant, per frame at 60fps. |
+| `dragFace` | `0.930` | Velocity kept per frame when a piece is face-on to the airflow. |
+| `dragEdge` | `0.985` | Velocity kept per frame when it is edge-on. |
+
+The gap between the two drag figures *is* the flutter: face-on a sheet settles
+at a terminal `0.22 / 0.07` = 3.1 px/frame, a drift you can follow with your
+eye; edge-on it knifes down several times faster.
+
+```js
+window.confettiBurstTuning = { gravity: 0.1 };   the moon
+```
+
+Leave it unset unless you are tuning. The shipped numbers are the ones the
+[maths](javascript/MATH.md) is written against.
+
+---
+
+Part of [Evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
+Setup from scratch: [`javascript/INSTALL.md`](javascript/INSTALL.md).
+The derivations: [`javascript/MATH.md`](javascript/MATH.md).

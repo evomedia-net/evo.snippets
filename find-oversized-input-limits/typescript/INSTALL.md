@@ -1,6 +1,6 @@
 <!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-Created by Kelly Michels · dev@evomedia.net
+Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
 
@@ -8,9 +8,9 @@ Licensed under the MIT License. See LICENSE.
 
 A step-by-step guide to running this scanner on your own project.
 
-**You do not need to know Python to use this.** It is a command you type once.
-There is nothing to install, no packages to download, and no configuration file
-to write — the scanner uses only what Python already ships with.
+**There is no build step and no `package.json`.** The `.ts` file *is* the
+program — modern Node runs TypeScript directly. Nothing to install, nothing to
+compile, no dependencies to download.
 
 ---
 
@@ -29,23 +29,26 @@ message?"* and need the real answer rather than a guess.
 
 ---
 
-## Step 1 — Check you have Python
+## Step 1 — Check your Node version
 
 Open a terminal and type:
 
 ```
-python --version
+node --version
 ```
 
 > **Opening a terminal:** on Windows press the Start button and type
 > `PowerShell`. On a Mac press ⌘+Space and type `Terminal`.
 
-You want **3.9 or newer** — for example `Python 3.12.1`.
+| What you see | What it means |
+| --- | --- |
+| `v23.6` or newer | Works as-is. Node runs TypeScript directly. |
+| `v22.6` – `v23.5` | Works. The launcher adds `--experimental-strip-types` for you. |
+| Older than `v22.6` | Will not run. Use the [Python twin](../python) instead — same flags, same output. |
+| command not found | Install Node from [nodejs.org](https://nodejs.org). |
 
-If it says the command is not found, try `python3 --version` and then
-`py --version`. If none of them work, install Python from
-[python.org/downloads](https://www.python.org/downloads/) and tick **"Add Python
-to PATH"** during setup.
+The launchers detect this themselves and exit with a clear message rather than a
+confusing TypeScript error, so you do not have to get it right first time.
 
 ## Step 2 — Get the files
 
@@ -53,13 +56,12 @@ You need two files from this folder, kept together:
 
 ```
 find-oversized-input-limits/
-  find_input_limits.py     <- the scanner
+  findInputLimits.ts       <- the scanner
   run.sh    or    run.ps1  <- the launcher for your system
 ```
 
-Use `run.ps1` on Windows and `run.sh` on macOS or Linux. The launcher is a
-convenience: it finds whichever of `python`, `python3` or `py` you have, so you
-do not have to know which one your machine uses.
+Use `run.ps1` on Windows and `run.sh` on macOS or Linux. The launcher works out
+which Node flags your version needs.
 
 ## Step 3 — Run it
 
@@ -80,20 +82,27 @@ Point it at the project you want to scan.
 > **If macOS or Linux says "permission denied":** the file needs to be marked
 > runnable once. Type `chmod +x run.sh` and try again.
 
-That is the whole setup. There is nothing to undo afterwards — the scanner only
-reads files, and it never writes anything into the project you point it at.
+On Node 23.6 or newer you can skip the launcher entirely:
+
+```bash
+node findInputLimits.ts /path/to/your-project
+```
+
+That is the whole setup. The scanner only reads files, and never writes anything
+into the project you point it at.
 
 ## Step 4 — Read the result
 
 You will get something like this:
 
 ```
-1 limit(s) over 2,500 characters -- all languages.
 contact.html:150:     4,000  html maxlength [rq-message]
     <textarea id="rq-message" name="message" required maxlength="4000" rows="4"></textarea>
+
+1 limit(s) over 2,500 characters -- all languages.
 ```
 
-Reading across that middle line:
+Reading across that first line:
 
 | Part | Meaning |
 | --- | --- |
@@ -127,14 +136,14 @@ The default is 2,500 characters. To find everything above 500:
 ./run.sh /path/to/project --summary
 ```
 
-Gives you totals per file and per rule — useful on a large codebase where the
-full listing runs off the screen.
+Totals per file and per rule — useful on a large codebase where the full listing
+runs off the screen.
 
 ### Only the certain matches
 
 Some patterns are genuinely ambiguous. `.max(5000)` is a character limit on a
 string and an item count on an array, and the scanner cannot always tell which.
-Those are printed with a trailing `(?)`. To hide them:
+Those print with a trailing `(?)`. To hide them:
 
 ```bash
 ./run.sh /path/to/project --high-only
@@ -142,9 +151,9 @@ Those are printed with a trailing `(?)`. To hide them:
 
 ### Fields with no limit at all
 
-A text box with no maximum, backed by a database column that accepts anything,
-is the *unbounded* case — arguably worse than a generous limit, and invisible by
-default because there is no number to find:
+A text box with no maximum, backed by a column that accepts anything, is the
+*unbounded* case — arguably worse than a generous limit, and invisible by default
+because there is no number to find:
 
 ```bash
 ./run.sh /path/to/project --include-unbounded
@@ -165,7 +174,7 @@ name is timestamped, so two scans never overwrite each other.
 ### Only certain languages
 
 ```bash
-./run.sh /path/to/project +py +json     # only Python and JSON
+./run.sh /path/to/project +ts +json     # only TypeScript and JSON
 ./run.sh /path/to/project -json         # everything except JSON
 ```
 
@@ -196,12 +205,21 @@ does not.
 
 ## If something did not work
 
-### "python: command not found"
+### It exits with a message about the Node version
 
-The launcher tries `python`, `python3` and `py` in turn, so this means none of
-them are installed or Python is not on your PATH. Reinstall from
-[python.org](https://www.python.org/downloads/) and make sure **"Add Python to
-PATH"** is ticked.
+Your Node is older than 22.6, which cannot run TypeScript at all. Either upgrade
+from [nodejs.org](https://nodejs.org), or use the
+[Python twin](../python) — identical flags,
+identical output.
+
+### "Unknown file extension .ts" or a syntax error on the first line
+
+You ran the file with a Node that does not strip types. Use the launcher rather
+than calling `node` directly, or add the flag yourself:
+
+```bash
+node --experimental-strip-types findInputLimits.ts /path/to/project
+```
 
 ### "permission denied" running ./run.sh
 
@@ -209,16 +227,17 @@ Mark it runnable: `chmod +x run.sh`. This is a one-off.
 
 ### PowerShell refuses to run run.ps1
 
-Windows blocks unsigned scripts by default. Either run the scanner directly:
-
-```powershell
-python find_input_limits.py C:\path\to\your-project
-```
-
-or allow local scripts for that window only:
+Windows blocks unsigned scripts by default. Either allow local scripts for that
+window only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run.ps1 C:\path\to\your-project
+```
+
+or, on Node 23.6+, call the scanner directly:
+
+```powershell
+node findInputLimits.ts C:\path\to\your-project
 ```
 
 ### It found nothing and I expected findings
@@ -228,7 +247,7 @@ Three likely reasons, in order:
 1. **Your limits are under the threshold.** The default only reports above
    2,500. Try `--limit 500`.
 2. **The limit is split across lines.** The scanner reads line by line, so a
-   `max_length=` on one line with the number on the next is missed.
+   `maxLength:` on one line with the number on the next is missed.
 3. **There is no declared limit to find.** A field with no maximum at all needs
    `--include-unbounded`.
 
@@ -240,11 +259,11 @@ is a column width in one framework and an array size in another. Use
 
 ---
 
-## Prefer TypeScript?
+## Prefer Python?
 
 There is an identical scanner in
-[`typescript/find-oversized-input-limits`](../../typescript/find-oversized-input-limits),
-with the same flags and the same output. Use whichever runtime you already have;
-neither needs anything installed beyond the runtime itself.
+[`find-oversized-input-limits/python`](../python),
+with the same flags and the same output. It needs Python 3.9+ and nothing else,
+so it is the better choice on an older machine.
 
 The full reference for every flag is in [README.md](README.md).
