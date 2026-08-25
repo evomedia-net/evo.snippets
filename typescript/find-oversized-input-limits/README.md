@@ -18,6 +18,10 @@ markup, the client validator, the server validator, and the column.
 > Identical rules, identical flags, byte-identical output — verified by diffing
 > both tools across all twelve modes. Run whichever runtime your machine has.
 
+[**INSTALL.md**](INSTALL.md) is a step-by-step setup guide that assumes no prior
+experience: check your Node version, run one command, read the result.
+Everything below is the reference.
+
 ## Run it
 
 ```bash
