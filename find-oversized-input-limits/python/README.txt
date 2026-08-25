@@ -1,26 +1,22 @@
 <!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-Created by Kelly Michels · dev@evomedia.net
+Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
 
-find-oversized-input-limits (TypeScript)
-========================================
+find-oversized-input-limits
+===========================
 
 Scans a codebase for user-input character limits above a threshold (default
 2500) and reports where each one is declared. One scanner covers every common
-fullstack — no per-language configuration, no dependencies, no build step.
+fullstack — no per-language configuration, no third-party dependencies.
 
 Written for the case where a form field carries a character counter with a cap
 that is too generous, and you need to find every place that cap is set: the
 markup, the client validator, the server validator, and the column.
 
-> This is the TypeScript twin of python/find-oversized-input-limits (../../python/find-oversized-input-limits/).
-> Identical rules, identical flags, byte-identical output — verified by diffing
-> both tools across all twelve modes. Run whichever runtime your machine has.
-
 INSTALL.md (INSTALL.md) is a step-by-step setup guide that assumes no prior
-experience: check your Node version, run one command, read the result.
+experience with Python: check your version, run one command, read the result.
 Everything below is the reference.
 
 Run it
@@ -30,23 +26,15 @@ Run it
 
     .\run.ps1 C:\path\to\project
 
-Both launchers pass every argument through and handle Node version detection.
+Both launchers pass every argument through to find_input_limits.py and pick
+the first available python / python3 / py on PATH. Python 3.9+, stdlib only.
 
-To import the function instead:
+To call it directly, or import the function:
 
-    import { findOversizedInputLimits } from "./findInputLimits.ts";
+    from find_input_limits import find_oversized_input_limits
 
-    for (const f of findOversizedInputLimits("./src", { limit: 2500, highOnly: true })) {
-      console.log(f.path, f.line, f.limit, f.kind);
-    }
-
-Requirements
-------------
-
-Node 22.6+. Node runs TypeScript directly from 23.6 on; 22.6–23.5 needs
---experimental-strip-types, which the launchers add automatically. On older
-Node they exit 2 with a message pointing at the Python twin. There is no build
-step and no package.json — the .ts file is the program.
+    for f in find_oversized_input_limits("./src", limit=2500, high_only=True):
+        print(f.path, f.line, f.limit, f.kind)
 
 Choosing languages
 ------------------
@@ -79,17 +67,21 @@ never overwrite each other and the files sort chronologically.
 
 | Flag | Writes |
 | --- | --- |
-| --json | ./20260811-20-05-31-oversized-limits.json |
-| --csv | ./20260811-20-05-31-oversized-limits.csv |
+| --json | ./20260811-19-06-51-oversized-limits.json |
+| --csv | ./20260811-19-06-51-oversized-limits.csv |
 | --md | Markdown table, ready to paste into an issue |
 | --txt | the console listing |
-| --out PATH | write exactly there instead; the format is inferred from the suffix if no format flag is given. Missing folders are created |
+| --out PATH | write exactly there instead; the format is inferred from the suffix if no format flag is given |
 | --no-stamp | drop the timestamp — ./oversized-limits.<ext> |
 | --stdout | print the report rather than writing a file |
 
-Paths inside every report are relative to the scanned root, so reports stay
-portable. Use --no-stamp or --out in CI, where the artifact path has to be
-predictable.
+So +json +py --json scans only JSON and Python files and writes
+./20260811-19-06-51-oversized-limits.json. Paths inside every report are
+relative to the scanned root, so reports stay portable.
+
+Use --no-stamp or --out in CI, where the artifact path has to be predictable:
+
+    ./run.sh ../SWAG-Estimates --json --out reports/swag.json
 
 Other options
 -------------
@@ -102,8 +94,8 @@ Other options
 | --include-unbounded | also flag TEXT / LONGTEXT / VARCHAR(MAX) / TextField columns, which have no ceiling at all |
 | --summary | counts by file and by rule instead of full output |
 
-Exit codes: 0 clean, 1 findings exist, 2 usage or environment error.
-The 0/1 split is what lets it drop into CI as a gate.
+Exit code is 1 when anything is found, 0 when clean, so it drops straight
+into CI as a gate.
 
 What it recognizes
 ------------------
@@ -138,7 +130,8 @@ Known limits
 
 - It finds declared limits. A <textarea> with no maxlength backed by a
   TEXT column is the unbounded case and needs --include-unbounded.
-- It is line-based, so a limit split across lines is missed.
+- It is line-based, so a limit split across lines
+  (max_length=\n    5000) is missed.
 - Vendor, build, and minified output is skipped, along with files over 2 MB and
   lines over 2000 characters.
 
@@ -146,5 +139,4 @@ Performance
 -----------
 
 A digit-count prefilter derived from --limit skips any line that cannot
-possibly match before the 22 regexes run. Real repositories scan in a few
-seconds.
+possibly match before the 22 regexes run. Real repositories scan in 2–5 seconds.

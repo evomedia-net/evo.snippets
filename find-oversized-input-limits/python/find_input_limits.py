@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-# Created by Kelly Michels · dev@evomedia.net
+# Created by Kelly Michels · kelly@evomedia.net
 # Licensed under the MIT License. See LICENSE.
 
 """Find user-input character limits above a threshold (default 2500) in any codebase.

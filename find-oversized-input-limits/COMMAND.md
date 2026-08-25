@@ -1,0 +1,186 @@
+<!--
+Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+Created by Kelly Michels · kelly@evomedia.net
+Licensed under the MIT License. See LICENSE.
+-->
+
+# find-oversized-input-limits — command reference
+
+Every option the scanner takes, what it does, and a command you can paste.
+
+Both implementations — [`python/`](python/) and [`typescript/`](typescript/) —
+take the same flags, in the same order, and print byte-identical output. Every
+example below works with either; only the launcher changes.
+
+## Running it
+
+Each implementation ships `run.ps1` and `run.sh`, which pass every argument
+straight through. The same command line works on Windows and Linux.
+
+```
+./run.sh  /path/to/project --limit 5000 --md
+.\run.ps1 C:\path\to\project --limit 5000 --md
+```
+
+Or call the program directly, if the runtime is already on PATH:
+
+```
+python find_input_limits.py /path/to/project --limit 5000 --md
+node   findInputLimits.ts   /path/to/project --limit 5000 --md
+```
+
+## Where it looks
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `root` | the current directory | The file or directory to scan. A single file is fine — it does not have to be a project root. |
+
+```
+./run.sh                      scan where you are standing
+./run.sh /path/to/project        scan a project
+./run.sh /path/to/project/form.tsx  scan one file
+```
+
+## What counts as a finding
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `--limit LIMIT` | `2500` | Report limits **strictly greater** than this. `--limit 2500` does not report a field capped at exactly 2,500. |
+| `--include-unbounded` | off | Also report `TEXT` and `VARCHAR(MAX)` columns, which have no ceiling to compare against and so are otherwise skipped. |
+| `--high-only` | off | Drop the ambiguous matches — `.max()`, `length:`, bare constants — and keep only the ones that are unmistakably an input limit. Use it when the default run is noisy. |
+
+```
+./run.sh /path/to/project --limit 10000              only the egregious ones
+./run.sh /path/to/project --include-unbounded        include columns with no cap
+./run.sh /path/to/project --high-only                drop the maybes
+```
+
+## What to search
+
+Selectors take a **single dash**, and go anywhere on the command line.
+
+| Form | What it does |
+| --- | --- |
+| *(no selector)* | Every supported language. |
+| `+py +json` | **Only** Python and JSON. |
+| `-py -json` | Everything **except** Python and JSON. |
+| `+frontend -json` | Combine: a group, minus a type. |
+
+The names: `config` `cs` `dart` `ex` `frontend` `go` `gql` `java` `js` `json`
+`php` `prisma` `py` `rb` `rs` `schema` `sql` `swift` `toml` `tpl` `ts` `web`
+`xml` `yaml`.
+
+An unknown name is treated as a literal extension, so `+kt` works without the
+tool having to know what Kotlin is.
+
+| Option | What it does |
+| --- | --- |
+| `--list-groups` | Print the extensions behind each group name, and exit. |
+
+```
+./run.sh /path/to/project +py                  Python files only
+./run.sh /path/to/project +frontend -json      front-end, but not JSON
+./run.sh /path/to/project +kt                  any extension, by name
+./run.sh --list-groups                      what does "frontend" cover?
+```
+
+### One dash or two
+
+This is the one place the command line can bite you:
+
+| Written | Means |
+| --- | --- |
+| `-json` | **Exclude** JSON *files* from the search. |
+| `--json` | Write the *report* as JSON. |
+
+## Output
+
+With no format flag the report is written to
+`./YYYYMMDD-HH-MM-SS-oversized-limits.txt` in the current directory.
+
+| Option | What it does |
+| --- | --- |
+| `--json` | JSON records. |
+| `--csv` | CSV, one row per finding. |
+| `--md` | A Markdown table. |
+| `--txt` | The console listing, as a file. |
+| `--summary` | Counts by file and by rule only — no individual findings. |
+| `--out PATH` | Write the report here instead of the timestamped name. |
+| `--stdout` | Print the report instead of writing a file. |
+| `--no-stamp` | Drop the timestamp prefix: `./oversized-limits.<ext>`. |
+
+```
+./run.sh /path/to/project --stdout             read it, write nothing
+./run.sh /path/to/project --md --out AUDIT.md  a file to commit
+./run.sh /path/to/project --csv --no-stamp     ./oversized-limits.csv
+./run.sh /path/to/project --stdout --summary   how bad is it, in ten lines
+```
+
+## Help
+
+`-help` works, alongside `--help`, `--h`, `-h`, and `-?` — so the spelling you
+reach for first is the one that answers.
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Nothing found above the limit. |
+| `1` | At least one finding. |
+| `2` | A usage or environment error — an unknown flag, or a root that does not exist. |
+
+That is the right way round for CI: the run fails when there is something to
+fix, so the scanner can be a gate with no wrapper script around it.
+
+```
+./run.sh ./src --high-only --stdout || echo "found something"
+```
+
+## A worked run
+
+Two files, with three limits between them:
+
+```
+$ ./run.sh ./src --stdout
+
+3 limit(s) over 2,500 characters -- all languages.
+signup.html:2:    20,000  html maxlength [bio]
+    <textarea name="bio" maxlength="20000"></textarea>
+models.py:2:     9,000  max_length kwarg
+    bio = models.CharField(max_length=9000)
+signup.html:1:     5,000  html maxlength [email]
+    <input name="email" maxlength="5000">
+```
+
+Findings are ordered largest first, so the worst offender is the first line you
+read. Each one gives `file:line:`, the limit, the rule that matched, and the
+source line itself.
+
+The same run as a summary:
+
+```
+$ ./run.sh ./src --stdout --summary
+
+3 limit(s) over 2,500 characters -- all languages.
+    2  signup.html
+    1  models.py
+
+    2  html maxlength
+    1  max_length kwarg
+```
+
+And narrowed to one language:
+
+```
+$ ./run.sh ./src --stdout +py
+
+1 limit(s) over 2,500 characters -- +py.
+models.py:2:     9,000  max_length kwarg
+    bio = models.CharField(max_length=9000)
+```
+
+---
+
+Part of [Evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
+Setup and background: [`python/INSTALL.md`](python/INSTALL.md),
+[`typescript/INSTALL.md`](typescript/INSTALL.md).

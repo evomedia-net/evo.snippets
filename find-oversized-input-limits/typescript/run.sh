@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-# Created by Kelly Michels · dev@evomedia.net
+# Created by Kelly Michels · kelly@evomedia.net
 # Licensed under the MIT License. See LICENSE.
 #
 # Launcher for findInputLimits.ts -- finds user-input character limits
@@ -47,6 +47,6 @@ elif [ "$NODE_MAJOR" -eq 22 ] 2>/dev/null; then
     exec node --experimental-strip-types "$SCANNER" "$@"
 else
     echo "Node $NODE_VERSION cannot run TypeScript directly; 22.6+ is required." >&2
-    echo "Either upgrade Node, or use the Python twin in ../../python." >&2
+    echo "Either upgrade Node, or use the Python twin in ../python." >&2
     exit 2
 fi

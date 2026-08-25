@@ -1,6 +1,6 @@
 <!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
-Created by Kelly Michels · dev@evomedia.net
+Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
 
@@ -236,7 +236,7 @@ Prefer TypeScript?
 ------------------
 
 There is an identical scanner in
-typescript/find-oversized-input-limits (../../typescript/find-oversized-input-limits),
+find-oversized-input-limits/typescript (../typescript),
 with the same flags and the same output. Use whichever runtime you already have;
 neither needs anything installed beyond the runtime itself.
 
