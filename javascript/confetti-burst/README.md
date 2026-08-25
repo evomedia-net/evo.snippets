@@ -31,6 +31,15 @@ fraction of a second, then descends slowly, swaying. Four forces, not one:
 Each piece is also drawn in two shades and flips between them as it turns
 edge-on, which is a sheet catching the light.
 
+## New to this?
+
+[**INSTALL.md**](INSTALL.md) is a step-by-step setup guide that assumes no prior
+experience: two files in one folder, double-clicked, no server and no build
+step. `example.html` is the finished page it walks through building &mdash; a
+blank white page with one **Fire** button.
+
+Everything below is the reference.
+
 ## Use
 
 ```html
@@ -212,7 +221,7 @@ MIT licence. See [NOTICE.md](NOTICE.md) before shipping it anywhere.
 
 | Option | Default | What it does |
 | --- | --- | --- |
-| `count` | `140` | pieces in this burst |
+| `count` | `140` | pieces in this burst, clamped to 1&ndash;2000 (see [Limits](#limits)) |
 | `origin` | `{ x: 0.5, y: 0.62 }` | `1`–`25` for a keypad position on the 5×5 grid (any fraction allowed), or `{x, y}` in fractions of the viewport |
 | `direction` | position's own aim, else `0` | a compass: **0 straight up**, 90 right, 180 straight down, 270 left. Wraps, so `350` and `-10` are the same aim |
 | `spread` | `70` | degrees of cone around the aim |
@@ -275,6 +284,34 @@ Two more worth knowing:
 - The animation loop stops entirely when the last piece is gone. A permanently
   running `requestAnimationFrame` on a long-lived page is background CPU spent
   on nothing.
+
+## Limits
+
+`count` is the one option a caller can use to hang a page: it drives an
+unbounded loop, and every piece costs five canvas calls per frame for as long as
+it lives. So it has hard bounds.
+
+| | Value | On breach |
+| --- | --- | --- |
+| Floor | `1` | clamped up, `console.warn` |
+| Ceiling | `2000` | clamped down, `console.warn` |
+| Not a number | falls back to `140` | silent |
+
+2000 is far above any real celebration &mdash; the playground tops out at 400 per
+cannon &mdash; and far below where the draw loop stops keeping up. For scale,
+20,000 pieces spend about 19&nbsp;ms just being created, before one is drawn,
+which is more than a whole frame at 60&nbsp;fps.
+
+Breaches warn rather than being capped silently: a burst that quietly ignores
+the number it was given is worse to debug than one that says why. The floor is 1
+for the same reason &mdash; a count of 0 draws nothing, which reads as the
+library being broken rather than as a bad argument.
+
+Nothing else is bounded that way. `origin` as a pad is held to 1&ndash;25, `loop`
+to 1&ndash;10, `loopDelay` to at least 60&nbsp;ms, `acceleration` to 1&ndash;10 and
+`age` to at least 0.2&nbsp;s, but `velocity`, `spread`, `scalar`, `drift` and
+`gravity` take whatever you pass: none of them can lock a tab, and a deliberately
+absurd launch speed is sometimes the effect you want.
 
 ## Browser support
 

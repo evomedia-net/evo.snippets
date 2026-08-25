@@ -74,6 +74,19 @@ window.confettiBurst = (function () {
   // burst fired at a corner looks exactly as it did. The sixteen new cells
   // aim inward with a slight upward bias, which lands within a few degrees
   // of the tuned nine and so reads as one continuous table rather than two.
+  // Caller-supplied count is the one option that can hang a page, so it
+  // gets hard bounds. 2000 is far above any real celebration - the tuning
+  // panel tops out at 400 per cannon - and far below the point where the
+  // draw loop stops keeping up.
+  var MAX_COUNT = 2000;
+  var MIN_COUNT = 1;
+
+  function warn(msg) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("confettiBurst: " + msg);
+    }
+  }
+
   var PAD = {
      1: { origin: { x: -0.02, y: -0.02 }, direction:    130 },
      2: { origin: { x:  0.25, y: -0.02 }, direction:    142 },
@@ -357,7 +370,27 @@ window.confettiBurst = (function () {
     // different acceleration does not retune the one already in flight.
     var accelK = Math.max(1, Math.min(10, +o.acceleration || 5)) / 5;
 
-    for (var i = 0; i < o.count; i++) {
+    // Ceiling and floor on count, because this one is caller-supplied and
+    // drives an unbounded loop. Every piece costs five canvas calls per
+    // frame for as long as it lives, so a mistyped 50000 does not degrade
+    // gracefully - it locks the tab. 20000 already spends 19ms just
+    // spawning, before anything is drawn.
+    //
+    // Warned rather than silently capped: a burst that quietly ignores the
+    // number it was given is worse to debug than one that says why. The
+    // floor is 1 for the same reason - a count of 0 draws nothing, which
+    // reads as the library being broken rather than as a bad argument.
+    var count = Math.round(+o.count);
+    if (!isFinite(count)) count = 140;
+    if (count > MAX_COUNT) {
+      warn("count " + count + " exceeds the " + MAX_COUNT + " ceiling; firing " + MAX_COUNT + ".");
+      count = MAX_COUNT;
+    } else if (count < MIN_COUNT) {
+      warn("count " + count + " is below the floor of " + MIN_COUNT + "; firing " + MIN_COUNT + ".");
+      count = MIN_COUNT;
+    }
+
+    for (var i = 0; i < count; i++) {
       var ang = (o.angle + (Math.random() - 0.5) * o.spread) * Math.PI / 180;
       var v = o.velocity * (0.75 + Math.random() * 0.5);
       var c = o.colors[i % o.colors.length];
