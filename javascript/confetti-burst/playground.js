@@ -85,7 +85,10 @@ window.confettiPlayground = (function () {
     'Four corners': [21, 25, 5, 1],
     'Across the top': [1, 2, 3, 4, 5],
     'Across the bottom': [21, 22, 23, 24, 25],
-    'Up both sides': [21, 16, 11, 6, 1, 25, 20, 15, 10, 5],
+    // Left and right rise together in pairs rather than one whole side and
+    // then the other, so the burst reads as two columns climbing at once.
+    // Order is firing order - the stagger walks the array.
+    'Up both sides': [21, 25, 16, 20, 11, 15, 6, 10, 1, 5],
     'Centre': [13]
   };
 
@@ -1052,6 +1055,38 @@ window.confettiPlayground = (function () {
 
     host.appendChild(bar);
     host.appendChild(grid);
+
+      // The controls are long. Tuning something near the bottom meant scrolling
+      // back up to fire, changing one thing, and scrolling up again - enough
+      // friction that people stop experimenting.
+      //
+      // It appears only once the real button has scrolled out of view, so it is
+      // never a duplicate of a control already on screen, and it calls the same
+      // fire() rather than a copy of it.
+      var floatB = el('button', 'cbp-btn cbp-btn--go cbp-fire-float', 'Fire');
+      floatB.type = 'button';
+      floatB.hidden = true;
+      floatB.setAttribute('aria-label', 'Fire confetti');
+      floatB.addEventListener('click', function () { fire(); });
+      document.body.appendChild(floatB);
+
+      function panelOnScreen() {
+        var r = host.getBoundingClientRect();
+        return r.bottom > 0 && r.top < (window.innerHeight || 0);
+      }
+
+      if (typeof IntersectionObserver === 'function') {
+        new IntersectionObserver(function (entries) {
+          floatB.hidden = entries[0].isIntersecting || !panelOnScreen();
+        }, { threshold: 0 }).observe(fireB);
+
+        // Hidden when the panel itself is gone, so it never floats over an
+        // unrelated part of a page that mounts this among other content.
+        new IntersectionObserver(function (entries) {
+          if (!entries[0].isIntersecting) floatB.hidden = true;
+        }, { threshold: 0 }).observe(host);
+      }
+
 
     function syncSliders() {
       SLIDERS.forEach(function (s) {
