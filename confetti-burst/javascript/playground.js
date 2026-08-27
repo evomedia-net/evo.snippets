@@ -521,6 +521,17 @@ window.confettiPlayground = (function () {
         aims.appendChild(el('p', 'cbp-hint', 'No positions selected.'));
         return;
       }
+      // Column headers for the rows below. Decorative only - each control
+      // already carries its own aria-label, so the header is hidden from
+      // assistive tech rather than announced as a table it is not.
+      var head = el('div', 'cbp-aim cbp-aim-head');
+      head.setAttribute('aria-hidden', 'true');
+      head.appendChild(el('span', 'cbp-aim-hcol', 'Section'));
+      head.appendChild(el('span', 'cbp-aim-hcol', 'Snap'));
+      head.appendChild(el('span', 'cbp-aim-hcol', 'Direction'));
+      head.appendChild(el('span', 'cbp-aim-hcol cbp-aim-hcol--slider', 'Angle selector'));
+      head.appendChild(el('span', 'cbp-aim-hcol'));
+      aims.appendChild(head);
       cannons.forEach(function (c) {
         var row = el('div', 'cbp-aim');
         row.appendChild(el('span', 'cbp-aim-at', String(c.at)));
@@ -533,7 +544,7 @@ window.confettiPlayground = (function () {
         // that looks like its own result needs no reading.
         var snap = el('button', 'cbp-aim-snap');
         snap.type = 'button';
-        snap.title = 'Snap Angle 45°';
+        snap.title = 'Snap to nearest 45°';
         snap.setAttribute('aria-label', 'Snap the aim to the next 45 degrees');
         snap.innerHTML =
           '<svg viewBox="0 0 24 24" aria-hidden="true">' +
