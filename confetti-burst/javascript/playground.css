@@ -161,13 +161,54 @@
 .cbp-pad button:focus-visible { outline: 2px solid var(--cbp-accent); outline-offset: 2px; }
 
 /* ── per-cannon aim ─────────────────────────────────────────────────── */
-.cbp-aims { display: grid; gap: 0.4rem; }
-.cbp-aim {
+/* One grid for the whole block, so the header row and every aim row share
+   the same column tracks (via subgrid below). The three icon columns size
+   to their widest cell - which is the header label, not the icon - so the
+   labels Section / Snap / Direction always have room. The slider column
+   (minmax 0 1fr) takes the slack on a wide panel and is the one that
+   shrinks on a narrow one, keeping the block inside its card on mobile. */
+.cbp-aims {
   display: grid;
-  grid-template-columns: 2.1rem 1.5rem 1.15rem 1fr auto;
-  gap: 0.45rem;
+  grid-template-columns: max-content max-content max-content minmax(0, 1fr) max-content;
+  column-gap: 0.45rem;
+  row-gap: 0.4rem;
   align-items: center;
 }
+.cbp-aim {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+}
+
+/* Header row above the aim rows. Small uppercase labels, one per column.
+   Decorative (aria-hidden in the markup) - the controls each carry their
+   own aria-label. */
+.cbp-aim-head {
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.1rem;
+  border-bottom: 1px solid var(--cbp-line);
+}
+.cbp-aim-hcol {
+  font: 700 0.58rem/1.1 var(--cbp-font);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--cbp-muted);
+  text-align: center;
+  white-space: nowrap;
+}
+/* Sits over the slider (the wide, shrinkable column). Left-align it to the
+   slider's start, and let it wrap rather than spill past the card when the
+   column narrows on mobile. */
+.cbp-aim-hcol--slider {
+  text-align: left;
+  white-space: normal;
+}
+
+/* Centre the number and icons under their (label-width) column headers. */
+.cbp-aim-at,
+.cbp-aim-snap,
+.cbp-aim-arrow { justify-self: center; }
 
 /* Snap to 45. Drawn as the thing it does - a baseline, a ray 45 degrees
    off it, and the arc between - so the button looks like its own result.
