@@ -86,7 +86,8 @@ all of them:
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Use them, fork them, ship them in your own work.
+Authored by Kelly Michels. Copyright Evomedia.net LLC, licensed MIT — see
+[LICENSE](LICENSE). Use them, fork them, ship them in your own work.
 
 ## Checks
 
