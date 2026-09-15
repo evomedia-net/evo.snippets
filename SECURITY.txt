@@ -1,0 +1,71 @@
+Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+Created by Kelly Michels · kelly@evomedia.net
+Licensed under the MIT License. See LICENSE.
+
+Security
+========
+
+How to report a vulnerability, what to expect, and what is in scope:
+the evomedia-net security policy (https://github.com/evomedia-net/.github/blob/main/SECURITY.md).
+Short version — email dev@evomedia.net (mailto:dev@evomedia.net), not a public
+issue.
+
+What follows is particular to this repository. It is not a service and there is
+nothing here to attack; it is code you copy into your project, where it becomes
+your code and inherits your trust boundary. So the honest things to be explicit
+about are what it does on your machine and what it sends anywhere.
+
+Nothing here calls out
+----------------------
+
+No snippet makes a network request, and none of them reports usage anywhere.
+The only fetch in the repository loads the bundled sound file from your own
+origin, alongside the script — it is an asset, not a beacon.
+
+There is no install step, no package to pull at runtime, and no shared runtime
+between snippets. Each folder is self-contained, which is also why there is no
+dependency tree here to audit.
+
+The scanner reads; it never runs what it finds
+----------------------------------------------
+
+find-oversized-input-limits walks a directory and reads source files looking
+for input-length limits. It opens files and matches text. It does not import,
+evaluate, execute or rewrite anything it reads, and it writes nothing back —
+its output is a report on stdout.
+
+Point it at a directory you trust to the extent you trust reading files from
+it. Reading a hostile file is not the same risk as running one, but it is not
+zero: a pathological file can waste your time and memory.
+
+You are running the code, so read it first
+------------------------------------------
+
+run.ps1 and run.sh are conveniences that invoke the snippet in the same
+folder. They are short enough to read in a minute, and worth reading in a
+minute — that applies to anything you are about to run, from here or anywhere.
+
+The browser snippet runs in your visitors' pages, with whatever privileges your
+page has. It touches the DOM and plays a sound; it reads no input and stores
+nothing.
+
+What "MIT" means here for risk
+------------------------------
+
+The licence gives you the code without warranty, which is the usual bargain and
+worth restating plainly: once copied, it is yours to maintain. There is no
+update channel that will reach a copy you took. If a defect is fixed here, your
+copy does not change until you change it.
+
+That is a deliberate trade — no install step and no shared runtime is the point
+of the thing — but it means "is my copy current?" is a question only you can
+answer.
+
+Not vulnerabilities
+-------------------
+
+- A wrong or missing finding from the scanner. It is a text search across
+  languages it cannot parse; it will miss limits and flag things that are not
+  limits. It is a starting point for a human, not an authority.
+- Output that is ugly in your terminal. Report it as a bug, gladly — it is
+  just not a security matter.

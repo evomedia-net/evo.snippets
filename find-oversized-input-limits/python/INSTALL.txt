@@ -1,8 +1,6 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 find-oversized-input-limits — setup guide
 =========================================
@@ -240,4 +238,4 @@ find-oversized-input-limits/typescript (../typescript),
 with the same flags and the same output. Use whichever runtime you already have;
 neither needs anything installed beyond the runtime itself.
 
-The full reference for every flag is in README.md (README.md).
+The full reference for every flag is in README.md.

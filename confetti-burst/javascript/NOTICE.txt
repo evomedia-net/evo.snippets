@@ -4,7 +4,7 @@ Created by Kelly Michels · kelly@evomedia.net
 Third-party content in this snippet
 ===================================
 
-The repository is MIT licensed. confetti.mp3 is not - it is
+The repository is MIT licensed. confetti.mp3 is not — it is
 third-party content under a separate licence, included here so the demo
 has something to play. Read this before shipping it anywhere.
 
@@ -15,7 +15,7 @@ confetti.mp3
 | --- | --- |
 | Title | 1gift-confetti |
 | Author | u_jspnqv1glx |
-| Source | Pixabay - https://pixabay.com/sound-effects/search/confetti/ |
+| Source | Pixabay — https://pixabay.com/sound-effects/search/confetti/ |
 | Licence | Pixabay Content License (https://pixabay.com/service/license-summary/) |
 | Attribution | Not required. Credit given anyway: Sound Effect by u_jspnqv1glx from Pixabay |
 | Retrieved | 23 August 2026 |
@@ -40,7 +40,7 @@ The restriction that applies to a snippet like this
 > NFT or other digital file.
 
 "Standalone" means no creative effort applied and substantially the same
-form as on Pixabay. This file is exactly that - an unmodified copy.
+form as on Pixabay. This file is exactly that — an unmodified copy.
 
 Bundling it as the demo's default sound is fine: it is a component of a
 larger work, not the product. But if you copy this snippet into
@@ -53,7 +53,7 @@ something you distribute:
   trimming it is creative effort applied, removes the ambiguity, and
   usually sounds better in context anyway.
 - Do not use it in a political, offensive, or misleading context, or as
-  part of a trade name - the licence forbids all of those.
+  part of a trade name — the licence forbids all of those.
 
 Or bring your own
 -----------------

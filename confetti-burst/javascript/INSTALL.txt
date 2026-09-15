@@ -234,7 +234,7 @@ Fire it more than once, slightly apart:
 setTimeout means "wait this many milliseconds, then do it". The small gap is
 what makes it read as two cannons rather than one big burst.
 
-The full list of settings is in README.md (README.md).
+The full list of settings is in README.md.
 
 ---
 

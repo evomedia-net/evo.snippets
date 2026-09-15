@@ -1,8 +1,6 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 evo.confetti — option reference
 ===============================
@@ -167,5 +165,5 @@ maths (javascript/MATH.md) is written against.
 ---
 
 Part of Evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
-Setup from scratch: javascript/INSTALL.md (javascript/INSTALL.md).
-The derivations: javascript/MATH.md (javascript/MATH.md).
+Setup from scratch: javascript/INSTALL.md.
+The derivations: javascript/MATH.md.

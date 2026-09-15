@@ -1,8 +1,6 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 Evomedia.net Snippets
 =====================
@@ -39,7 +37,7 @@ Go, Spring, .NET, SQL.
 | Language | Folder | What you need installed |
 | --- | --- | --- |
 | Python | find-oversized-input-limits/python/ | Python 3.9+ on PATH. The launchers pick the first available python, python3, or py. |
-| TypeScript | find-oversized-input-limits/typescript/ | Node 22.6+. Node runs TypeScript directly from 23.6 on; 22.6-23.5 gets --experimental-strip-types added by the launchers. No build step, no package.json - the .ts file is the program. |
+| TypeScript | find-oversized-input-limits/typescript/ | Node 22.6+. Node runs TypeScript directly from 23.6 on; 22.6–23.5 gets --experimental-strip-types added by the launchers. No build step, no package.json — the .ts file is the program. |
 
 The two are twins: same flags, same exit codes, byte-identical output. Pick by
 what your machine already has.
@@ -80,7 +78,7 @@ all of them:
 
 - A folder per snippet, named for what it does.
 - README.md plus a plain-text README.txt twin, kept in sync.
-- COMMAND.md at the snippet root - every option the snippet takes, what it
+- COMMAND.md at the snippet root — every option the snippet takes, what it
   does, and a sample of its use, with a COMMAND.txt twin.
 - run.ps1 and run.sh launchers that pass every argument straight through,
   so the same command line works on Windows and Linux.
@@ -92,7 +90,7 @@ all of them:
 License
 -------
 
-MIT — see LICENSE (LICENSE). Use them, fork them, ship them in your own work.
+MIT — see LICENSE. Use them, fork them, ship them in your own work.
 
 Checks
 ------
@@ -102,7 +100,7 @@ There is one, and it runs with nothing installed:
     python check_no_local_paths.py
 
 CI runs it on every push to main and every pull request
-(.github/workflows/checks.yml (.github/workflows/checks.yml)), and it is a
+(.github/workflows/checks.yml), and it is a
 required check on main - a pull request with a red run cannot merge.
 
 It refuses any tracked file that contains a path from a developer's own
