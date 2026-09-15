@@ -1,15 +1,13 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 find-oversized-input-limits — command reference
 ===============================================
 
 Every option the scanner takes, what it does, and a command you can paste.
 
-Both implementations — python/ (python/) and typescript/ (typescript/) —
+Both implementations — python/ and typescript/ —
 take the same flags, in the same order, and print byte-identical output. Every
 example below works with either; only the launcher changes.
 
@@ -172,5 +170,5 @@ And narrowed to one language:
 ---
 
 Part of Evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
-Setup and background: python/INSTALL.md (python/INSTALL.md),
-typescript/INSTALL.md (typescript/INSTALL.md).
+Setup and background: python/INSTALL.md,
+typescript/INSTALL.md.

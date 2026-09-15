@@ -25,3 +25,11 @@ jobs:
         # own disk, which is unrunnable for everyone else and, in a public
         # repo, leaks their machine layout. Fix the example; never the check.
         run: python check_no_local_paths.py
+
+      - name: Every .md has a current .txt twin
+        # The twins are generated, not hand-kept. A hand-kept duplicate drifts,
+        # and the drift is invisible precisely because nobody reads both
+        # copies - this repository carries twelve of them. --check regenerates
+        # in memory and compares, so a .md edit that forgets to run the
+        # generator fails here rather than shipping a stale mirror in public.
+        run: python check_md_twins.py --check

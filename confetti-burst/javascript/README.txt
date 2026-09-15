@@ -1,8 +1,6 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 confetti-burst
 ==============
@@ -213,7 +211,7 @@ with the bundled clip or any audio file on your machine — nothing is uploaded.
 confetti.mp3 is **Sound Effect by u_jspnqv1glx from
 Pixabay (https://pixabay.com/sound-effects/search/confetti/)** — attribution is
 not required by that licence, and is given anyway. It is third-party content and
-not covered by this repository's MIT licence. See NOTICE.md (NOTICE.md)
+not covered by this repository's MIT licence. See NOTICE.md
 before shipping it anywhere.
 
 One cheer, many pops

@@ -1,8 +1,6 @@
-<!--
 Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
--->
 
 find-oversized-input-limits — setup guide
 =========================================
@@ -256,4 +254,4 @@ find-oversized-input-limits/python (../python),
 with the same flags and the same output. It needs Python 3.9+ and nothing else,
 so it is the better choice on an older machine.
 
-The full reference for every flag is in README.md (README.md).
+The full reference for every flag is in README.md.
