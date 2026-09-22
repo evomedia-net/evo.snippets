@@ -1,5 +1,5 @@
 <!--
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 -->
 

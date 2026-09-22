@@ -1,5 +1,5 @@
 <!--
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
@@ -181,6 +181,6 @@ models.py:2:     9,000  max_length kwarg
 
 ---
 
-Part of [Evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
+Part of [evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
 Setup and background: [`python/INSTALL.md`](python/INSTALL.md),
 [`typescript/INSTALL.md`](typescript/INSTALL.md).
