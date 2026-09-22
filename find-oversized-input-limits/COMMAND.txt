@@ -1,4 +1,4 @@
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 
@@ -169,6 +169,6 @@ And narrowed to one language:
 
 ---
 
-Part of Evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
+Part of evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
 Setup and background: python/INSTALL.md,
 typescript/INSTALL.md.

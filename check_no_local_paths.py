@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+# evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 r"""Refuse any tracked file that contains a path from a developer's own machine.
 
 A usage example like `.\run.ps1 F:\evomedia.net\www` is harmless on the

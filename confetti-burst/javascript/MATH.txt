@@ -1,4 +1,4 @@
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 
@@ -161,6 +161,6 @@ g = 900, dt = 1/60 and d = 0.97 you get v* = 500 px/s drag-then-gravity,
 ---
 
 Part of evo.confetti (README.md) in
-Evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
+evomedia.net Snippets (https://github.com/evomedia-net/evo.snippets).
 A rendered version lives at
 evomedia.net/evo-confetti-math.html (https://evomedia.net/evo-confetti-math.html).

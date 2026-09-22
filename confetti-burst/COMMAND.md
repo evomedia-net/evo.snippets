@@ -1,5 +1,5 @@
 <!--
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
@@ -177,6 +177,6 @@ Leave it unset unless you are tuning. The shipped numbers are the ones the
 
 ---
 
-Part of [Evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
+Part of [evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
 Setup from scratch: [`javascript/INSTALL.md`](javascript/INSTALL.md).
 The derivations: [`javascript/MATH.md`](javascript/MATH.md).

@@ -1,5 +1,5 @@
 <!--
-Evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
+evomedia.net Snippets — https://github.com/evomedia-net/evo.snippets
 Created by Kelly Michels · kelly@evomedia.net
 Licensed under the MIT License. See LICENSE.
 -->
@@ -172,6 +172,6 @@ Every number here is checkable. Drag 0.97 at 60 fps gives `k ≈ 1.83 s⁻¹`; w
 ---
 
 Part of [evo.confetti](README.md) in
-[Evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
+[evomedia.net Snippets](https://github.com/evomedia-net/evo.snippets).
 A rendered version lives at
 [evomedia.net/evo-confetti-math.html](https://evomedia.net/evo-confetti-math.html).
