@@ -51,6 +51,9 @@ confetti-burst
 A confetti burst that falls like paper rather than sparks — air drag,
 tumble-driven flutter, and a numpad grid of firing positions.
 
+Try it! evomedia.net/evo-confetti.html (https://www.evomedia.net/evo-confetti.html)
+— the live playground, nothing to download.
+
 | Language | Folder | What you need installed |
 | --- | --- | --- |
 | JavaScript | confetti-burst/javascript/ | A browser. Nothing to install and nothing to serve: open the snippet's evo.confetti.html and it runs. |

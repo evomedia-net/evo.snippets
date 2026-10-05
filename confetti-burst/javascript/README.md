@@ -12,6 +12,9 @@ step, no framework.
 Open `evo.confetti.html` in a browser to see it. Nothing to install and nothing to
 serve — it is a file you double-click.
 
+**Try it!** [evomedia.net/evo-confetti.html](https://www.evomedia.net/evo-confetti.html)
+runs the same playground live, nothing to download.
+
 ## Why it looks different
 
 Most confetti effects give each piece a velocity and gravity, and nothing
