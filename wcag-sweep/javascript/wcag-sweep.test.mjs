@@ -11,7 +11,8 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
+import { createServer, request } from 'node:http'
+import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, startEgressFilter, Browser, findChrome, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -61,6 +62,11 @@ test('urls: same origin and page-shaped', () => {
 test('guard: private, loopback, link-local and CGNAT ranges, v4 and v6', () => {
   for (const ip of ['10.0.0.1', '172.16.0.1', '172.31.255.254', '192.168.50.1', '127.0.0.1', '169.254.169.254', '0.0.0.0', '100.64.0.1', '::1', 'fc00::1', 'fd12::1', 'fe80::1', '::ffff:192.168.1.2', 'not-an-ip']) assert.equal(isPrivateAddress(ip), true, ip)
   for (const ip of ['8.8.8.8', '52.1.28.159', '172.32.0.1', '100.128.0.1', '2606:4700::1111', '::ffff:8.8.8.8']) assert.equal(isPrivateAddress(ip), false, ip)
+})
+
+test('guard: reserved and multicast ranges, and IPv4 carried inside IPv6 however it is written', () => {
+  for (const ip of ['224.0.0.1', '239.255.255.250', '240.0.0.1', '255.255.255.255', '198.18.0.1', '198.19.255.254', '192.0.0.8', '::', '::ffff:c0a8:102', '::ffff:7f00:1', '::127.0.0.1', '64:ff9b::c0a8:101', '64:ff9b::10.0.0.1', '2002:c0a8:101::1', '2002:0a00:0001::', 'ff02::1', 'fe80::1%eth0']) assert.equal(isPrivateAddress(ip), true, ip)
+  for (const ip of ['198.20.0.1', '192.0.1.1', '223.255.255.254', '64:ff9b::808:808', '2002:808:808::1', '2001:4860:4860::8888']) assert.equal(isPrivateAddress(ip), false, ip)
 })
 
 test('guard: localhost names and literal private hosts are refused without a lookup', async () => {
@@ -126,4 +132,125 @@ test('report: self-contained, escaped, and says what it checked', () => {
   assert.match(html, /Skip to summary/)
   const clean = sample(); clean.pages[0].results[0].violations = []; clean.pages[1].reflow = { overflow: 0, clipped: [] }; clean.summary = summarize(clean)
   assert.match(renderHtml(clean), /No violations of the WCAG 2\.2 A and AA rules/)
+})
+
+// ── the egress filter ───────────────────────────────────────────────────────
+const listen = (server, host = '127.0.0.1') => new Promise((r) => server.listen(0, host, () => r(server.address().port)))
+function target(host = '127.0.0.1') {
+  const hits = []
+  const server = createServer((req, res) => { hits.push({ path: req.url, host: req.headers.host }); res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('reached') })
+  return { server, hits, listen: () => listen(server, host) }
+}
+function viaProxy(proxyPort, url, hostHeader) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: proxyPort, path: url, headers: { host: hostHeader } }, (res) => { let b = ''; res.on('data', (c) => { b += c }); res.on('end', () => resolve({ status: res.statusCode, body: b })) })
+    req.on('error', reject); req.end()
+  })
+}
+function tunnel(proxyPort, authority) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: proxyPort, method: 'CONNECT', path: authority })
+    req.on('connect', (res, socket) => resolve({ status: res.statusCode, socket }))
+    req.on('response', (res) => resolve({ status: res.statusCode }))
+    req.on('error', reject); req.end()
+  })
+}
+
+test('egress filter: refuses private addresses by literal, by name and by what a name resolves to, for http and CONNECT', async () => {
+  const t = target(); const port = await t.listen()
+  const seen = []
+  const f = await startEgressFilter({ resolve: async (h) => h === 'sneaky.test' ? [{ address: '8.8.8.8' }, { address: '127.0.0.1' }] : [{ address: '127.0.0.1' }], onRefuse: (host) => seen.push(host) })
+  try {
+    for (const host of ['127.0.0.1', 'localhost', 'sneaky.test', 'router.local']) {
+      const r = await viaProxy(f.port, `http://${host}:${port}/x`, `${host}:${port}`)
+      assert.equal(r.status, 403, host)
+      assert.doesNotMatch(r.body, /127\.0\.0\.1/, 'the refusal does not echo what the name resolved to')
+      assert.equal((await tunnel(f.port, `${host}:${port}`)).status, 403, `CONNECT ${host}`)
+    }
+    assert.equal((await tunnel(f.port, `[::1]:${port}`)).status, 403)
+    assert.equal(t.hits.length, 0, 'nothing reached the private target')
+    assert.equal(f.refused, 9)
+    assert.deepEqual([...new Set(seen)].sort(), ['127.0.0.1', '::1', 'localhost', 'router.local', 'sneaky.test'])
+  } finally { await f.close(); t.server.close() }
+})
+
+test('egress filter: passes public traffic to the address it checked, Host header intact, and tunnels CONNECT', async () => {
+  const t = target(); const port = await t.listen()
+  // ok.test does not exist in real DNS: reaching the target proves the filter
+  // connected to the address it vetted rather than looking the name up again.
+  const f = await startEgressFilter({ resolve: async () => [{ address: '127.0.0.1' }], isPrivate: () => false })
+  try {
+    const r = await viaProxy(f.port, `http://ok.test:${port}/page?q=1`, `ok.test:${port}`)
+    assert.equal(r.status, 200); assert.equal(r.body, 'reached')
+    assert.deepEqual(t.hits[0], { path: '/page?q=1', host: `ok.test:${port}` })
+    const c = await tunnel(f.port, `ok.test:${port}`)
+    assert.equal(c.status, 200)
+    const body = await new Promise((resolve) => { let b = ''; c.socket.on('data', (d) => { b += d }); c.socket.on('end', () => resolve(b)); c.socket.write(`GET /tunnelled HTTP/1.1\r\nHost: ok.test\r\nConnection: close\r\n\r\n`) })
+    assert.match(body, /^HTTP\/1\.1 200 [\s\S]*\r\n\r\n[\s\S]*reached/) // chunked: the body ends in its terminator, not the text
+    assert.equal(t.hits[1].path, '/tunnelled')
+    assert.equal(f.refused, 0)
+    assert.equal((await tunnel(f.port, 'no-port.test')).status, 400)
+    assert.equal((await viaProxy(f.port, '/relative', 'x')).status, 400)
+  } finally { await f.close(); t.server.close() }
+})
+
+test('egress filter: close() ends open tunnels', async () => {
+  const echo = createServer(); echo.on('connection', (s) => s.pipe(s))
+  const port = await listen(echo)
+  const f = await startEgressFilter({ resolve: async () => [{ address: '127.0.0.1' }], isPrivate: () => false })
+  const c = await tunnel(f.port, `ok.test:${port}`)
+  assert.equal(c.status, 200)
+  const closed = new Promise((r) => c.socket.on('close', r))
+  await f.close()
+  await closed
+  echo.close()
+})
+
+// The filter only helps if the browser really sends everything through it.
+// A page served as page.test links to trap.test (127.0.0.2), to 127.0.0.2
+// directly, to localhost, and fetches and frames the trap. With everything
+// allowed the trap is reached - which proves this test can fail; with the
+// filter's rules nothing private is.
+let chrome = null
+try { chrome = findChrome() } catch {}
+test('egress filter: a real browser sends every request through it, loopback included', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const trap = target('127.0.0.2'); const trapPort = await trap.listen()
+  const pageHits = []
+  const page = createServer((req, res) => {
+    pageHits.push(req.url)
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end(`<!doctype html><html lang="en"><head><title>probe</title><link rel="stylesheet" href="/own.css"></head><body>
+<img src="http://trap.test:${trapPort}/by-name" alt=""><img src="http://127.0.0.2:${trapPort}/by-address" alt="">
+<img src="http://localhost:${page.address().port}/via-localhost" alt="">
+<iframe title="frame" src="http://127.0.0.2:${trapPort}/frame"></iframe>
+<script>fetch('http://trap.test:${trapPort}/fetch').catch(() => {})</script></body></html>`)
+    }
+    res.writeHead(200, { 'Content-Type': 'text/css' }); res.end('body{}')
+  })
+  const pagePort = await listen(page)
+  const resolve = async (h) => { if (h === 'page.test') return [{ address: '127.0.0.1' }]; if (h === 'trap.test') return [{ address: '127.0.0.2' }]; throw new Error('offline in this test') }
+  const visit = async (isPrivate) => {
+    const f = await startEgressFilter({ resolve, isPrivate })
+    const b = new Browser(chrome, 1280, f.chromeFlags())
+    try {
+      await b.start()
+      const opened = await b.open(`http://page.test:${pagePort}/`, 15000)
+      await new Promise((r) => setTimeout(r, 1500))
+      return { title: opened.title, refused: f.refused }
+    } finally { await b.close(); await f.close() }
+  }
+  try {
+    const open = await visit(() => false)
+    assert.equal(open.title, 'probe')
+    assert.ok(trap.hits.length > 0, 'with everything allowed the trap is reached, so the guarded run below means something')
+    trap.hits.length = 0; pageHits.length = 0
+
+    const guarded = await visit((a) => a !== '127.0.0.1')
+    assert.equal(guarded.title, 'probe', 'the page itself still loads')
+    assert.ok(pageHits.includes('/own.css'), 'the page\'s own resources still load')
+    assert.deepEqual(trap.hits, [], 'nothing reached a private address')
+    assert.ok(!pageHits.includes('/via-localhost'), 'localhost was not reached either')
+    assert.ok(guarded.refused >= 4, `refused ${guarded.refused}`)
+  } finally { trap.server.close(); page.close() }
 })

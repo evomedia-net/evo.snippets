@@ -83,10 +83,22 @@ For a scanner that takes addresses from strangers
 -------------------------------------------------
 
 --public-only resolves every hostname, before the first request and again
-after any redirect, and refuses anything on a private, loopback, link-local or
-carrier-grade NAT address, or named localhost, .localhost or .local. Off
-by default, because the commonest use of this tool is a dev server on
-localhost. On for anything that lets other people choose the target.
+after any redirect, and refuses anything on a private, loopback, link-local,
+carrier-grade NAT, multicast or reserved address (IPv4 carried inside IPv6
+included), or named localhost, .localhost or .local. Off by default,
+because the commonest use of this tool is a dev server on localhost. On for
+anything that lets other people choose the target.
+
+Checking the page's address is only half of it: the page then loads what it
+likes, and an image, script, frame, fetch or WebSocket pointed at
+192.168.1.1 is a request from inside whatever network runs the scan. So under
+--public-only the browser reaches the network only through a small proxy on
+loopback that the sweep starts and stops. The proxy resolves each host itself,
+refuses the same addresses, and connects to the address it checked, so a DNS
+answer cannot change between the check and the connection. Nothing bypasses
+it, loopback included, and WebRTC is held to proxied traffic. The report counts
+what was refused without naming it, because a public report listing the
+internal names a page probed for would tell its author which ones exist.
 
 The browser and axe-core
 ------------------------
