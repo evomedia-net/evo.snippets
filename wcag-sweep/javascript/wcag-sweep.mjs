@@ -18,15 +18,16 @@
 // Exit codes: 0 clean, 1 violations found, 2 usage or environment error.
 
 import { spawn } from 'node:child_process'
+import { createServer, request as httpRequest } from 'node:http'
 import { createHash } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { isIP } from 'node:net'
+import { connect, isIP } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const VERSION = '1.0.0'
+export const VERSION = '1.1.0'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 // ── axe-core, vendored and pinned ───────────────────────────────────────────
@@ -76,9 +77,11 @@ What is checked
                        sideways overflow, and text that clips when WCAG's spacing
                        overrides are applied.
   --public-only        Refuse any page whose host resolves to a private, loopback or
-                       link-local address, including after redirects. For a scanner
-                       that takes addresses from strangers; off by default so a dev
-                       server on localhost can be audited.
+                       link-local address, including after redirects, and send every
+                       request a page makes (images, scripts, frames, fetch,
+                       WebSockets) through a filter that refuses the same addresses.
+                       For a scanner that takes addresses from strangers; off by
+                       default so a dev server on localhost can be audited.
 
 Where the result goes
   --json <file>        Full machine-readable report.
@@ -177,17 +180,32 @@ export function looksLikePage(url) {
 export function isPrivateAddress(ip) {
   const v = isIP(ip)
   if (v === 4) {
-    const [a, b] = ip.split('.').map(Number)
+    const [a, b, c] = ip.split('.').map(Number)
     return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127)
+      || (a === 192 && b === 0 && c === 0) || (a === 198 && (b === 18 || b === 19)) || a >= 224 // IETF, benchmarking, multicast, reserved, broadcast
   }
   if (v === 6) {
-    const low = ip.toLowerCase()
-    if (low === '::1' || low === '::') return true
-    if (low.startsWith('::ffff:')) return isPrivateAddress(low.slice(7))
-    const first = parseInt(low.split(':')[0] || '0', 16)
-    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80
+    const g = ipv6Groups(ip)
+    const v4 = (hi, lo) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`
+    if (g.slice(0, 6).every((x) => x === 0)) return isPrivateAddress(v4(g[6], g[7])) // ::, ::1 and IPv4-compatible
+    if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return isPrivateAddress(v4(g[6], g[7])) // IPv4-mapped
+    if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isPrivateAddress(v4(g[6], g[7])) // NAT64
+    if (g[0] === 0x2002) return isPrivateAddress(v4(g[1], g[2])) // 6to4
+    return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xff00) === 0xff00 // unique local, link-local, multicast
   }
   return true // not an address at all: refuse
+}
+
+// Eight 16-bit groups, whichever way the address was written (::, a dotted
+// IPv4 tail, a zone), so an IPv4 address inside an IPv6 one can be read.
+function ipv6Groups(ip) {
+  let s = ip.toLowerCase().replace(/%.*$/, '')
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s)
+  if (dotted) { const [a, b, c, d] = dotted.slice(1).map(Number); s = s.slice(0, dotted.index) + ((a << 8) | b).toString(16) + ':' + ((c << 8) | d).toString(16) }
+  const [head, tail] = s.split('::')
+  const h = head ? head.split(':') : [], tl = tail ? tail.split(':') : []
+  const fill = tail === undefined ? [] : Array(8 - h.length - tl.length).fill('0')
+  return [...h, ...fill, ...tl].map((x) => parseInt(x, 16))
 }
 
 export async function assertPublicHost(url) {
@@ -195,6 +213,83 @@ export async function assertPublicHost(url) {
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) throw new Error(`${host} is not a public host`)
   const addrs = isIP(host) ? [{ address: host }] : await lookup(host, { all: true })
   for (const { address } of addrs) if (isPrivateAddress(address)) throw new Error(`${host} resolves to ${address}, which is not public`)
+}
+
+// ── the egress filter ───────────────────────────────────────────────────────
+// Checking a page's address is not enough: the page then loads what it likes,
+// and an image, script, frame, fetch or WebSocket pointed at 192.168.1.1 or a
+// container's name is a request from inside the network running the scan. So
+// under --public-only every request the browser makes goes through this proxy
+// on loopback. It resolves each host itself, refuses the addresses
+// isPrivateAddress refuses, and connects to the address it checked, so a DNS
+// answer cannot change between the check and the connection.
+//
+// What it refused is counted, not listed: a public report naming the internal
+// hosts a page probed for would tell whoever wrote the page which ones exist.
+// `resolve` and `isPrivate` are parameters for the tests.
+export async function startEgressFilter({ resolve = (host) => lookup(host, { all: true }), isPrivate = isPrivateAddress, onRefuse = null } = {}) {
+  let refused = 0
+  const open = new Set()
+  const track = (s) => { open.add(s); s.on('close', () => open.delete(s)) }
+  const vet = async (raw) => {
+    const host = raw.replace(/^\[|\]$/g, '').toLowerCase()
+    try {
+      if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) throw new Error(`${host} is not a public host`)
+      const addrs = isIP(host) ? [{ address: host }] : await resolve(host)
+      if (!addrs.length) throw new Error(`${host} did not resolve`)
+      for (const { address } of addrs) if (isPrivate(address)) throw new Error(`${host} resolves to ${address}, which is not public`)
+      return addrs[0].address
+    } catch (e) {
+      refused++
+      if (onRefuse) onRefuse(host, e.message)
+      throw e
+    }
+  }
+  // Plain http: the request line carries the whole URL.
+  const server = createServer(async (req, res) => {
+    let target
+    try { target = new URL(req.url) } catch { res.writeHead(400); return res.end() }
+    if (target.protocol !== 'http:') { res.writeHead(400); return res.end() }
+    let address
+    try { address = await vet(target.hostname) } catch { res.writeHead(403, { 'Content-Type': 'text/plain' }); return res.end('refused by wcag-sweep: not a public address') }
+    const headers = { ...req.headers }
+    delete headers['proxy-connection']; delete headers['proxy-authorization']
+    const up = httpRequest({ host: address, port: target.port || 80, method: req.method, path: target.pathname + target.search, headers, setHost: false }, (r) => {
+      res.writeHead(r.statusCode, r.statusMessage, r.headers)
+      r.pipe(res)
+    })
+    up.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end() })
+    req.pipe(up)
+  })
+  // https and wss: CONNECT host:port, then bytes both ways. A plain ws://
+  // upgrade has no listener, and Node closes those.
+  server.on('connect', async (req, socket, head) => {
+    track(socket); socket.on('error', () => {})
+    const m = /^(\[[^\]]+\]|[^:/\s]+):(\d{1,5})$/.exec(req.url || '')
+    if (!m) return socket.end('HTTP/1.1 400 Bad Request\r\n\r\n')
+    let address
+    try { address = await vet(m[1]) } catch { return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n') }
+    const up = connect(Number(m[2]), address, () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+      if (head && head.length) up.write(head)
+      up.pipe(socket); socket.pipe(up)
+    })
+    track(up)
+    up.on('error', () => socket.destroy())
+    socket.on('close', () => up.destroy())
+  })
+  server.on('connection', track)
+  server.on('clientError', (e, socket) => socket.destroy())
+  await new Promise((r) => server.listen(0, '127.0.0.1', r))
+  const port = server.address().port
+  return {
+    port,
+    get refused() { return refused },
+    // The flags that send everything through it: nothing bypasses, loopback
+    // included, and WebRTC may not open UDP of its own.
+    chromeFlags: () => [`--proxy-server=http://127.0.0.1:${port}`, '--proxy-bypass-list=<-loopback>', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-quic'],
+    close: () => new Promise((r) => { for (const s of open) s.destroy(); server.close(() => r()) }),
+  }
 }
 
 async function readSitemap(url, seen = new Set()) {
@@ -237,14 +332,14 @@ export function chromeCandidates(platform = process.platform, env = process.env)
   return c
 }
 
-function findChrome(explicit) {
+export function findChrome(explicit) {
   if (explicit) { if (existsSync(explicit)) return explicit; throw new UsageError(`no browser at ${explicit}`) }
   for (const p of chromeCandidates()) if (existsSync(p)) return p
   throw new UsageError('no Chrome, Edge or Chromium found; pass --chrome <path> or set WCAG_SWEEP_CHROME')
 }
 
-class Browser {
-  constructor(exe, width) { this.exe = exe; this.width = width; this.id = 0; this.pending = new Map() }
+export class Browser {
+  constructor(exe, width, flags = []) { this.exe = exe; this.width = width; this.flags = flags; this.id = 0; this.pending = new Map() }
   async start() {
     this.profile = mkdtempSync(join(tmpdir(), 'wcag-sweep-'))
     this.port = 9222 + Math.floor(Math.random() * 20000)
@@ -252,7 +347,7 @@ class Browser {
     // --disable-dev-shm-usage, or --no-sandbox where the kernel sandbox is
     // unavailable. Space separated.
     const extra = (process.env.WCAG_SWEEP_CHROME_FLAGS || '').split(/\s+/).filter(Boolean)
-    this.proc = spawn(this.exe, ['--headless=new', `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--hide-scrollbars', '--mute-audio', `--window-size=${this.width},900`, ...extra, 'about:blank'], { stdio: 'ignore' })
+    this.proc = spawn(this.exe, ['--headless=new', `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--hide-scrollbars', '--mute-audio', `--window-size=${this.width},900`, ...this.flags, ...extra, 'about:blank'], { stdio: 'ignore' })
     let wsUrl
     for (let i = 0; i < 150 && !wsUrl; i++) { try { const r = await fetch(`http://127.0.0.1:${this.port}/json/version`); if (r.ok) wsUrl = (await r.json()).webSocketDebuggerUrl } catch {} if (!wsUrl) await sleep(200) }
     if (!wsUrl) throw new Error('the browser did not come up')
@@ -357,8 +452,11 @@ export async function sweep(o, log = console.error) {
 
   if (o.list && !o.crawl) { for (const q of queue) console.log(q.url); return { report, exit: 0 } }
 
+  // Under --public-only the browser reaches the network only through the filter.
+  const egress = o.publicOnly ? await startEgressFilter({ onRefuse: o.quiet ? null : (host, why) => log(`refused a request: ${why}`) }) : null
+  const flags = egress ? egress.chromeFlags() : []
   const browsers = new Map()
-  const browserFor = async (w) => { if (!browsers.has(w)) { const b = new Browser(chrome, w); await b.start(); await b.setUserAgent(ua(o.userAgent)); browsers.set(w, b) } return browsers.get(w) }
+  const browserFor = async (w) => { if (!browsers.has(w)) { const b = new Browser(chrome, w, flags); await b.start(); await b.setUserAgent(ua(o.userAgent)); browsers.set(w, b) } return browsers.get(w) }
   if (o.reflow && !o.widths.includes(320)) await browserFor(320)
 
   try {
@@ -412,6 +510,7 @@ export async function sweep(o, log = console.error) {
     if (queue.length) report.capped = { atPages: o.maxPages, left: queue.length }
   } finally {
     for (const b of browsers.values()) await b.close()
+    if (egress) { report.refused = egress.refused; await egress.close() }
   }
   if (o.list) return { report, exit: 0 }
   if (!report.pages.length) {
@@ -446,7 +545,7 @@ export function summarize(report) {
 
 export function formatSummary(report) {
   const s = report.summary
-  const lines = [`${s.pages} page${s.pages === 1 ? '' : 's'} at ${s.widths.join(', ')}px — ${s.violationNodes} node${s.violationNodes === 1 ? '' : 's'} failing across ${s.rules.length} rule${s.rules.length === 1 ? '' : 's'}${report.options.reflow ? `; reflow problems on ${s.reflowPages}` : ''}${s.errors ? `; ${s.errors} page load${s.errors === 1 ? '' : 's'} failed` : ''}${s.skipped ? `; ${s.skipped} skipped` : ''}${report.capped ? `; stopped at ${report.capped.atPages} pages with ${report.capped.left} left` : ''}.`]
+  const lines = [`${s.pages} page${s.pages === 1 ? '' : 's'} at ${s.widths.join(', ')}px — ${s.violationNodes} node${s.violationNodes === 1 ? '' : 's'} failing across ${s.rules.length} rule${s.rules.length === 1 ? '' : 's'}${report.options.reflow ? `; reflow problems on ${s.reflowPages}` : ''}${s.errors ? `; ${s.errors} page load${s.errors === 1 ? '' : 's'} failed` : ''}${s.skipped ? `; ${s.skipped} skipped` : ''}${report.refused ? `; ${report.refused} request${report.refused === 1 ? '' : 's'} to non-public addresses refused` : ''}${report.capped ? `; stopped at ${report.capped.atPages} pages with ${report.capped.left} left` : ''}.`]
   for (const r of s.rules) lines.push(`  ${String(r.nodes).padStart(5)}  ${r.id.padEnd(32)} ${r.impact.padEnd(9)} ${r.pages} page${r.pages === 1 ? '' : 's'}  ${r.help}`)
   return lines.join('\n')
 }
@@ -497,6 +596,7 @@ caption{text-align:left;font-weight:600;padding:.3rem 0}pre{white-space:pre-wrap
 <h2 id="summary">Summary</h2>
 ${s.violationNodes === 0 ? `<p class="ok">No violations of the WCAG 2.2 A and AA rules axe-core can test, on any page at any width.</p>` : `<p><strong>${s.violationNodes}</strong> element${s.violationNodes === 1 ? '' : 's'} fail${s.violationNodes === 1 ? 's' : ''} across <strong>${s.rules.length}</strong> rule${s.rules.length === 1 ? '' : 's'}.</p>`}
 ${report.options.reflow ? `<p>Reflow at 320px: ${s.reflowPages === 0 ? 'every page fits and nothing clips under WCAG text spacing.' : `<strong>${s.reflowPages}</strong> page${s.reflowPages === 1 ? '' : 's'} with sideways overflow or clipped text.`}</p>` : ''}
+${report.refused ? `<p>The pages asked for ${report.refused} resource${report.refused === 1 ? '' : 's'} at addresses that are not on the public internet. Those were refused and not loaded, so anything they would have added to a page was not audited.</p>` : ''}
 ${report.capped ? `<p>The sweep stopped at ${report.capped.atPages} pages with ${report.capped.left} more discovered. Raise <code>--max-pages</code> to go further.</p>` : ''}
 <p class="lede">What a machine can test is necessary, not sufficient: keyboard order, meaningful names, captions and the sense of the text still need a person. A clean run here means the automated half is clean.</p>
 ${s.rules.length ? `<table><caption>By rule</caption><thead><tr><th scope="col">Rule</th><th scope="col">Impact</th><th scope="col">Elements</th><th scope="col">Pages</th><th scope="col">What it means</th></tr></thead><tbody>${s.rules.map((r) => `<tr><td><a href="#r-${esc(r.id)}">${esc(r.id)}</a></td><td class="${esc(r.impact)}">${esc(r.impact)}</td><td>${r.nodes}</td><td>${r.pages}</td><td>${esc(r.help)}</td></tr>`).join('')}</tbody></table>` : ''}
