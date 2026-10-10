@@ -89,6 +89,7 @@ Where the result goes
 The browser
   --chrome <path>      Chrome, Edge or Chromium executable. Found automatically on
                        Windows, macOS and Linux; WCAG_SWEEP_CHROME overrides too.
+                       WCAG_SWEEP_CHROME_FLAGS adds launch flags (space separated).
   --axe <path>         Use another copy of axe.min.js instead of the vendored,
                        checksum-pinned ${AXE_VERSION}. The report records which ran.
 
@@ -247,7 +248,11 @@ class Browser {
   async start() {
     this.profile = mkdtempSync(join(tmpdir(), 'wcag-sweep-'))
     this.port = 9222 + Math.floor(Math.random() * 20000)
-    this.proc = spawn(this.exe, ['--headless=new', `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--hide-scrollbars', '--mute-audio', `--window-size=${this.width},900`, 'about:blank'], { stdio: 'ignore' })
+    // WCAG_SWEEP_CHROME_FLAGS adds flags a container may need, such as
+    // --disable-dev-shm-usage, or --no-sandbox where the kernel sandbox is
+    // unavailable. Space separated.
+    const extra = (process.env.WCAG_SWEEP_CHROME_FLAGS || '').split(/\s+/).filter(Boolean)
+    this.proc = spawn(this.exe, ['--headless=new', `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--hide-scrollbars', '--mute-audio', `--window-size=${this.width},900`, ...extra, 'about:blank'], { stdio: 'ignore' })
     let wsUrl
     for (let i = 0; i < 150 && !wsUrl; i++) { try { const r = await fetch(`http://127.0.0.1:${this.port}/json/version`); if (r.ok) wsUrl = (await r.json()).webSocketDebuggerUrl } catch {} if (!wsUrl) await sleep(200) }
     if (!wsUrl) throw new Error('the browser did not come up')
@@ -324,6 +329,10 @@ const REFLOW = `(() => {
 })()`
 
 // ── the run ─────────────────────────────────────────────────────────────────
+// `o.onPage(page, state)` is called as each page starts ('start') and ends
+// ('done'), and `o.onQueue(audited, queued)` after each page, so a host that
+// shows a report while it is being made has something to show. `o.signal` is
+// an AbortSignal: once aborted, no further page is started.
 export async function sweep(o, log = console.error) {
   const chrome = findChrome(o.chrome)
   let axeSource, axeNote
@@ -358,8 +367,10 @@ export async function sweep(o, log = console.error) {
       const { url, depth } = queue.shift()
       if (!looksLikePage(url)) { report.skipped.push({ url, why: 'not a page by its extension' }); continue }
       if (o.publicOnly) { try { await assertPublicHost(url) } catch (e) { report.skipped.push({ url, why: e.message }); continue } }
+      if (o.signal && o.signal.aborted) { report.aborted = true; break }
       audited++
       const page = { url, title: '', results: [] }
+      if (o.onPage) o.onPage(page, 'start')
       let discovered = []
       for (const [wi, width] of o.widths.entries()) {
         const b = await browserFor(width)
@@ -387,6 +398,8 @@ export async function sweep(o, log = console.error) {
       }
       if (o.list && o.crawl) console.log(url)
       if (page.results.length || o.list) report.pages.push(page)
+      if (o.onPage) o.onPage(page, 'done')
+      if (o.onQueue) o.onQueue(audited, queue.length)
       if (o.crawl && depth < o.depth) {
         for (const href of discovered) {
           const n = normalizeUrl(href, url)
