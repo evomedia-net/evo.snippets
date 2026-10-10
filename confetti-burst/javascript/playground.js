@@ -668,6 +668,11 @@ window.confettiPlayground = (function () {
       gapSl.disabled = !on;
       gapOut.textContent = (S.loopGap / 1000).toFixed(1) + ' s';
       gapRow.style.opacity = on ? '' : '0.55';
+      // Dimmed because the slider is disabled; say so, so the label and
+      // readout count as an inactive control (WCAG 1.4.3 exempts those)
+      // rather than as faint text.
+      gapRow.setAttribute('role', 'group');
+      gapRow.setAttribute('aria-disabled', on ? 'false' : 'true');
       loopOut.textContent = on
         ? '×' + S.loop + ' over ' + (((S.loop - 1) * S.loopGap) / 1000).toFixed(1) + ' s'
         : 'fires once';
@@ -796,6 +801,7 @@ window.confettiPlayground = (function () {
       var filePick = document.createElement('input');
       filePick.type = 'file';
       filePick.accept = 'audio/*';
+      filePick.setAttribute('aria-label', 'Sound file'); // the picker has no <label>; WCAG 4.1.2
       picker.appendChild(filePick);
       pSnd.appendChild(picker);
 
