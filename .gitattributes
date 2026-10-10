@@ -9,3 +9,9 @@
 # Python and TypeScript are LF everywhere.
 *.py text eol=lf
 *.ts text eol=lf
+
+# Vendored third-party code reaches every checkout byte for byte. wcag-sweep
+# pins axe-core by SHA-256, and core.autocrlf=true (the Git for Windows
+# default) rewrote axe.min.js to CRLF on checkout, so the guard refused to run
+# on every Windows clone. -text means git never converts these files.
+**/vendor/** -text
