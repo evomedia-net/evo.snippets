@@ -60,6 +60,21 @@ tumble-driven flutter, and a numpad grid of firing positions.
 Every option, with a call you can paste:
 [`confetti-burst/COMMAND.md`](confetti-burst/COMMAND.md).
 
+### wcag-sweep
+
+Crawls a site and runs axe-core's WCAG 2.2 Level A and AA rules on every page,
+in the Chrome or Edge already on your machine. A sitemap, a crawl or a list in;
+a console summary, a JSON file and a self-contained HTML report out; exit 1 when
+anything fails, so it gates a build. The whole-site sweep every online checker
+charges for, free and local.
+
+| Language | Folder | What you need installed |
+| --- | --- | --- |
+| JavaScript | [`wcag-sweep/javascript/`](wcag-sweep/javascript/) | Node 22+ and Chrome, Edge or Chromium. axe-core 4.11.4 is vendored beside the script, pinned by checksum, under its own MPL-2.0 licence; nothing to download. |
+
+Every flag, with a command you can paste:
+[`wcag-sweep/COMMAND.md`](wcag-sweep/COMMAND.md).
+
 ## Twins
 
 Where the same snippet exists in two languages, the two are kept **behaviorally
@@ -82,7 +97,9 @@ all of them:
   does, and a sample of its use, with a `COMMAND.txt` twin.
 - **`run.ps1` and `run.sh` launchers** that pass every argument straight through,
   so the same command line works on Windows and Linux.
-- **Standard library only.** No dependencies to install, no lockfile to drift.
+- **Standard library only.** No dependencies to install, no lockfile to drift. The
+  one exception is vendored, not fetched: wcag-sweep carries axe-core beside the
+  script, pinned by version and checksum, with its own licence in the folder.
 - **Exit code 0 when clean, 1 when the tool found something**, so any snippet can
   be dropped into CI as a gate without a wrapper.
 - **`-help` works**, alongside `--help`, `--h`, `-h`, and `-?`.
