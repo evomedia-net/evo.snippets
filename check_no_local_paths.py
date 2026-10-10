@@ -31,6 +31,12 @@ PATTERN = re.compile(r"(?<![A-Za-z0-9])(?:%s|%s|%s|%s)" % (_PROFILE, _DRIVE, _WS
 TEXT_SUFFIXES = (".md", ".txt", ".py", ".ts", ".js", ".ps1", ".sh", ".cmd",
                  ".json", ".yml", ".yaml", ".toml", ".cfg", ".ini")
 SELF = "check_no_local_paths.py"
+# Third-party code we vendor unmodified is not our usage example and is not
+# ours to edit: a minified library can carry a regex literal such as
+# `g:/&(?!#?\w+;` that looks exactly like a drive path. Anything under a
+# vendor/ folder is skipped; the folder carries the upstream licence and a
+# VERSION file with the checksum that pins it instead.
+VENDOR_SEGMENT = "/vendor/"
 
 
 def tracked_files():
@@ -42,6 +48,8 @@ def tracked_files():
 def offenders(paths):
     for path in paths:
         if path == SELF or not path.lower().endswith(TEXT_SUFFIXES):
+            continue
+        if VENDOR_SEGMENT in "/" + path:
             continue
         try:
             text = open(path, encoding="utf-8").read()
