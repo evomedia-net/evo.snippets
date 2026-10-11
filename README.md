@@ -65,8 +65,9 @@ Every option, with a call you can paste:
 Crawls a site and runs axe-core's WCAG 2.2 Level A and AA rules on every page,
 in the Chrome or Edge already on your machine. A sitemap, a crawl or a list in;
 a console summary, a JSON file and a self-contained HTML report out; exit 1 when
-anything fails, so it gates a build. The whole-site sweep every online checker
-charges for, free and local.
+anything fails, so it gates a build. Signs in when the pages are behind a login:
+you sign in once in a browser window, and the sweep runs with that session. The
+whole-site sweep every online checker charges for, free and local.
 
 | Language | Folder | What you need installed |
 | --- | --- | --- |

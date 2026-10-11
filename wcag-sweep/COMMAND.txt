@@ -35,16 +35,59 @@ count as one page.
 | --sitemap <url> | Audit every <loc> in a sitemap. A sitemap index is followed. |
 | --urls <file> | Audit the addresses in a file, one per line; # starts a comment. |
 | --crawl | Follow same-origin links from each page audited, breadth first. |
-| --max-pages <n> | Stop after this many pages, whatever the source. Default 25. |
+| --max-pages <n> | Stop after this many pages, whatever the source. Default 25. 0 is no cap. |
 | --depth <n> | How many links deep a crawl goes from a start page. Default 2. 0 audits only the pages given. |
+| --exclude <regex> | Skip discovered pages whose address matches, case-insensitive. Repeatable. Calendars and faceted search can make a site endless; this is how to leave them out. |
 | --list | Print the pages that would be audited and stop. With --crawl, that is the crawl's result. |
 
     ./run.sh https://example.com                                  one page
     ./run.sh https://example.com --crawl                          the site, 25 pages, 2 deep
     ./run.sh https://example.com --crawl --max-pages 100 --depth 3
+    ./run.sh https://example.com --crawl --max-pages 0 --depth 50 --exclude /calendar/
+                                                                  the whole site, no page cap
     ./run.sh --sitemap https://example.com/sitemap.xml
     ./run.sh --urls pages.txt
     ./run.sh https://example.com --crawl --list > pages.txt       keep the crawl as a list
+
+Signing in
+----------
+
+For the pages behind a site's sign-in. The sweep runs headless; the sign-in
+happens once, in a browser window you can use.
+
+| Option | What it does |
+| --- | --- |
+| --login <url> | Open a visible browser at this sign-in page. Sign in there however the site asks (password, passkey, SSO, a code from your phone), then press Enter in the terminal. The sweep runs with that session. The tool never sees a password. |
+| --session <file> | With --login, keep the session in this file. Without it, sweep with a session kept earlier: unattended, until the site ends the session. |
+| --header <name: value> | Send this request header to the site's own origin, and to no other host a page loads from. For a staging site behind basic auth or a token. Repeatable. |
+
+    ./run.sh https://app.example.com/ --crawl --login https://app.example.com/login
+    ./run.sh https://app.example.com/ --crawl --login https://app.example.com/login --session app.session.json
+    ./run.sh https://app.example.com/ --crawl --session app.session.json        later, no window
+    ./run.sh https://staging.example.com/ --crawl --header "Authorization: $STAGING_AUTH"
+
+- What the session is. The cookies the site set while you signed in, kept
+  only for the hosts being swept (an identity provider's cookies are left
+  out), and each swept origin's local storage, where single-page apps keep
+  their tokens. They are put into every headless browser before its first
+  page.
+- Keep the session file like a password. Anyone holding it is signed in as
+  you until the site ends the session. It is written readable by its owner
+  only (where the file system has that notion), and never copied into the
+  report. Keep it out of shared folders and repositories, and delete it when
+  the work is done.
+- Log-out links are not followed while signed in: following one would end
+  the session the sweep runs on. They are listed as skipped. Add your own
+  patterns with --exclude, for links that change things when opened.
+- When the session ends partway through - it expired, or you signed out
+  elsewhere - the site sends the next page to its sign-in page. The sweep
+  says so on the console and in the report, with the page where it happened.
+- Limits. A sign-in kept only in sessionStorage does not carry over: it
+  belongs to one browser tab. A crawl follows <a href> links. A menu that
+  navigates by script finds no pages, so give them with --urls, or start
+  from a page that links to every other (a site map).
+- Use a test account where you can. The sweep only opens pages, but a page
+  that changes something just by being opened will change it.
 
 How each page is rendered
 -------------------------

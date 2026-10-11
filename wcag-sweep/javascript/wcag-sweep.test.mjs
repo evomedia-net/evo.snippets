@@ -13,6 +13,9 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createServer, request } from 'node:http'
 import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, startEgressFilter, Browser, findChrome, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
+import { parseHeader, SIGNED_IN_EXCLUDE, withHeaders, domainMatch, toCookieParams, seedStorageScript, writeSession, readSession, isSignInPage, sweep, captureSession } from './wcag-sweep.mjs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -253,4 +256,158 @@ test('egress filter: a real browser sends every request through it, loopback inc
     assert.ok(!pageHits.includes('/via-localhost'), 'localhost was not reached either')
     assert.ok(guarded.refused >= 4, `refused ${guarded.refused}`)
   } finally { trap.server.close(); page.close() }
+})
+
+// ── signing in (#43) ────────────────────────────────────────────────────────
+
+test('arguments: signing in, exclusions, and a whole site', () => {
+  const o = parseArgs(['https://a.test/', '--login', 'https://a.test/login', '--session', 's.json', '--header', 'Authorization: Basic eDp5', '--header', 'X-Env:staging', '--exclude', '/calendar/', '--exclude', 'print=1', '--max-pages', '0'])
+  assert.equal(o.login, 'https://a.test/login'); assert.equal(o.session, 's.json')
+  assert.deepEqual(o.headers, [['Authorization', 'Basic eDp5'], ['X-Env', 'staging']])
+  assert.deepEqual(o.exclude, ['/calendar/', 'print=1']); assert.equal(o.maxPages, 0)
+  const d = parseArgs(['https://a.test/'])
+  assert.equal(d.login, null); assert.equal(d.session, null); assert.deepEqual(d.headers, []); assert.deepEqual(d.exclude, [])
+})
+
+test('arguments: a header that is not "Name: value", a bad pattern, a sign-in page that is not a URL', () => {
+  for (const bad of [['--header', 'no colon'], ['--header', ': empty name'], ['--header', 'Bad Name: v'], ['--exclude', '('], ['--login', 'not a url']]) {
+    assert.throws(() => parseArgs(['https://a.test/', ...bad]), UsageError, bad.join(' '))
+  }
+  assert.throws(() => parseHeader('X-A: one\r\nX-B: two'), /line break/)
+  assert.ok(HELP.includes('--login <url>') && HELP.includes('--session <file>') && HELP.includes('--header <h: v>') && HELP.includes('--exclude <regex>'))
+})
+
+test('log-out links are recognised by the word standing alone, and nothing else is', () => {
+  for (const u of ['https://a.test/logout', 'https://a.test/log-out', 'https://a.test/auth/signout', 'https://a.test/sign-off?next=/', 'https://a.test/user/logoff', 'https://a.test/logout.php', 'https://a.test/?action=logout', 'https://a.test/LogOut']) {
+    assert.ok(SIGNED_IN_EXCLUDE.test(u), u)
+  }
+  for (const u of ['https://a.test/catalog-outdoor', 'https://a.test/blog/outing', 'https://a.test/signup', 'https://a.test/login', 'https://a.test/logouts-and-more-reading']) {
+    assert.ok(!SIGNED_IN_EXCLUDE.test(u), u)
+  }
+})
+
+test("headers: ours replace the page's by name, case-insensitively, and the rest pass through", () => {
+  assert.deepEqual(withHeaders({ Accept: 'text/html', authorization: 'old' }, [['Authorization', 'new']]),
+    [{ name: 'Accept', value: 'text/html' }, { name: 'Authorization', value: 'new' }])
+})
+
+test("cookies: kept only for the swept hosts, and given back without a session cookie's expiry", () => {
+  assert.ok(domainMatch('app.a.test', '.a.test') && domainMatch('a.test', 'a.test') && !domainMatch('a.test', 'b.test') && !domainMatch('evila.test', 'a.test'))
+  assert.deepEqual(toCookieParams([{ name: 's', value: 'v', domain: 'a.test', path: '/', expires: -1, session: true, httpOnly: true, secure: true, sameSite: 'Lax', size: 2, priority: 'Medium' },
+    { name: 'p', value: 'w', domain: '.a.test', path: '/x', expires: 2e9, session: false }]),
+  [{ name: 's', value: 'v', domain: 'a.test', path: '/', secure: true, httpOnly: true, sameSite: 'Lax' },
+    { name: 'p', value: 'w', domain: '.a.test', path: '/x', secure: false, httpOnly: false, expires: 2e9 }])
+})
+
+test('local storage is put back for its own origin only, and never over a value the page has', () => {
+  const src = seedStorageScript({ 'https://a.test': { token: 'abc' } })
+  const run = (origin, store) => {
+    const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v } }
+    new Function('localStorage', 'location', src)(localStorage, { origin })
+    return store
+  }
+  assert.deepEqual(run('https://a.test', {}), { token: 'abc' })
+  assert.deepEqual(run('https://a.test', { token: 'newer' }), { token: 'newer' })
+  assert.deepEqual(run('https://b.test', {}), {})
+})
+
+test('session file: round trip, owner-only on POSIX, and a clear error for anything else', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wcag-sweep-test-'))
+  try {
+    const f = join(dir, 's.json')
+    const s = { tool: 'wcag-sweep', format: 1, captured: '2026-10-11T00:00:00Z', login: 'https://a.test/login', cookies: [{ name: 'sid', value: 'x', domain: 'a.test', path: '/' }], localStorage: {} }
+    writeSession(f, s)
+    assert.deepEqual(readSession(f), s)
+    if (process.platform !== 'win32') assert.equal(statSync(f).mode & 0o777, 0o600)
+    assert.throws(() => readSession(join(dir, 'missing.json')), /no such file/)
+    writeSession(f, { not: 'a session' })
+    assert.throws(() => readSession(f), /not a wcag-sweep session file/)
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('the sign-in page is recognised whatever its query says', () => {
+  assert.ok(isSignInPage('https://a.test/login?next=%2Fprivate', 'https://a.test/login'))
+  assert.ok(isSignInPage('https://a.test/login/', 'https://a.test/login'))
+  assert.ok(!isSignInPage('https://a.test/private', 'https://a.test/login'))
+  assert.ok(!isSignInPage('https://b.test/login', 'https://a.test/login'))
+})
+
+// A site with a page behind its sign-in. The kept session reaches it; the
+// log-out link is never followed; the header reaches the site and not the
+// other host its page loads an image from; localStorage is put back. Then a
+// session the site no longer accepts: the sweep says it ended.
+test('signed in: a real browser sweeps the private page with a kept session', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const other = { hits: [] }
+  const otherServer = createServer((req, res) => { other.hits.push(req.headers['x-test'] || null); res.writeHead(200, { 'Content-Type': 'image/gif' }); res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64')) })
+  const otherPort = await listen(otherServer)
+  const site = { hits: [], headers: [] }
+  const html = (title, body) => `<!doctype html><html lang="en"><head><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`
+  const siteServer = createServer((req, res) => {
+    site.hits.push(req.url); site.headers.push(req.headers['x-test'] || null)
+    const signedIn = /(^|; )sid=ok($|;)/.test(req.headers.cookie || '')
+    if (req.url === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      return res.end(html('Home', `<p><a href="/private">Private</a> <a href="/logout">Log out</a></p><img src="http://localhost:${otherPort}/pixel.gif" alt=""><script>document.title = 'Home ' + (localStorage.getItem('token') || 'none')</script>`))
+    }
+    if (req.url === '/private') {
+      if (!signedIn) { res.writeHead(302, { Location: '/login?next=%2Fprivate' }); return res.end() }
+      res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end(html('Private', '<p>Only for people signed in.</p>'))
+    }
+    if (req.url.startsWith('/login')) { res.writeHead(200, { 'Content-Type': 'text/html' }); return res.end(html('Sign in', '<form><label>Email <input name="e"></label></form>')) }
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end(html('Bye', ''))
+  })
+  const port = await listen(siteServer)
+  const base = `http://127.0.0.1:${port}`
+  const dir = mkdtempSync(join(tmpdir(), 'wcag-sweep-test-'))
+  const sweepWith = async (sid) => {
+    const f = join(dir, `s-${sid}.json`)
+    writeSession(f, { tool: 'wcag-sweep', format: 1, captured: '2026-10-11T00:00:00Z', login: `${base}/login`, cookies: [{ name: 'sid', value: sid, domain: '127.0.0.1', path: '/', session: true }], localStorage: { [base]: { token: 'kept' } } })
+    const o = parseArgs([`${base}/`, '--crawl', '--session', f, '--header', 'X-Test: yes', '--delay', '0', '--timeout', '15000', '--fail-on', 'none', '--chrome', chrome])
+    return (await sweep(o, () => {})).report
+  }
+  try {
+    const r = await sweepWith('ok')
+    const titles = r.pages.map((p) => p.title)
+    assert.ok(titles.includes('Private'), `the private page itself was swept: ${titles}`)
+    assert.ok(titles.includes('Home kept'), `local storage was put back: ${titles}`)
+    assert.ok(!site.hits.includes('/logout'), 'the log-out link was not followed')
+    assert.ok(r.skipped.some((k) => k.url === `${base}/logout` && /log-out link/.test(k.why)))
+    assert.ok(site.headers.every((h) => h === 'yes'), 'every request to the site carried the header')
+    assert.ok(other.hits.length > 0 && other.hits.every((h) => h === null), 'the other host was reached, and never sent the header')
+    assert.match(r.options.signedIn, /signed in with a session kept on 2026-10-11/)
+    assert.equal(r.sessionLost, undefined)
+    assert.ok(!JSON.stringify(r).includes('sid'), 'the report carries no cookie')
+
+    const lost = await sweepWith('expired')
+    assert.deepEqual(lost.sessionLost, { at: `${base}/private` })
+    assert.match(formatSummary(lost), /the session ended at/)
+    assert.match(renderHtml(lost), /The session ended/)
+  } finally { siteServer.close(); otherServer.close(); rmSync(dir, { recursive: true, force: true }) }
+})
+
+// --login, played by the test: the "person" signs in on the page the capture
+// opened (the site sets a session cookie and a localStorage token), and an
+// identity provider's cookie is in the same browser. The capture keeps the
+// site's cookie and token and not the other cookie.
+test('--login: the capture keeps the swept site\'s cookies and local storage, and no one else\'s', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const siteServer = createServer((req, res) => {
+    if (req.url === '/do-login') { res.writeHead(200, { 'Content-Type': 'text/html', 'Set-Cookie': 'sid=ok; Path=/; HttpOnly' }); return res.end('<!doctype html><title>in</title><script>localStorage.setItem("token", "t1")</script>') }
+    res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><html lang="en"><title>page</title><p>page</p></html>')
+  })
+  const port = await listen(siteServer)
+  const base = `http://127.0.0.1:${port}`
+  const o = parseArgs([`${base}/`, '--login', `${base}/login`, '--timeout', '15000', '--chrome', chrome])
+  let prompted = ''
+  const person = async (prompt, b) => {
+    prompted = prompt
+    await b.open(`${base}/do-login`, 15000)
+    await b.send('Storage.setCookies', { cookies: [{ name: 'idp', value: 'secret', domain: 'idp.test', path: '/' }] })
+  }
+  try {
+    const s = await captureSession(chrome, o, new Map([[base, `${base}/`]]), () => {}, person, { headless: true })
+    assert.match(prompted, /Sign in to 127\.0\.0\.1:\d+ in the browser window/)
+    assert.deepEqual(s.cookies.map((c) => c.name), ['sid'], 'the site\'s cookie, and not the identity provider\'s')
+    assert.deepEqual(s.localStorage, { [base]: { token: 't1' } })
+    assert.equal(s.login, `${base}/login`); assert.equal(s.tool, 'wcag-sweep')
+  } finally { siteServer.close() }
 })
