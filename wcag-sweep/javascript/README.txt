@@ -72,12 +72,27 @@ Where the pages come from
 | Addresses you give | <url> ... | As many as you like. |
 | A sitemap | --sitemap <url> | Reads every <loc>; follows a sitemap index. |
 | A list | --urls <file> | One per line, # comments. |
-| A crawl | --crawl | Follows same-origin links from each page audited, breadth first, until --max-pages (25) or --depth (2). |
+| A crawl | --crawl | Follows same-origin links from each page audited, breadth first, until --max-pages (25; 0 for no cap) or --depth (2). |
 
 They combine; duplicates are dropped, /, /index.html and /#top count once,
 and anything whose extension says it is not a page (PDF, image, script, feed) is
-skipped and listed. --list prints the pages a run would audit and stops, which
-turns a crawl into a --urls file you can keep.
+skipped and listed. --exclude <regex> leaves out discovered pages by address.
+--list prints the pages a run would audit and stops, which turns a crawl into
+a --urls file you can keep.
+
+Signing in
+----------
+
+--login <url> opens a visible browser at the site's sign-in page. You sign in
+there, any way the site asks, and press Enter in the terminal. The sweep then
+runs headless with that session: the site's cookies and local storage, put
+into each browser before its first page. The tool never sees a password.
+--session <file> keeps the session for later runs without a window, until
+the site ends it, and anyone holding that file is signed in as you, so keep it
+like a password. --header sends a header (a staging site's basic auth, say)
+to the site's own origin only. While signed in, log-out links are not
+followed, and if the site ends the session partway through, the report says
+where. ../COMMAND.md (../COMMAND.md#signing-in) has the commands and the limits.
 
 For a scanner that takes addresses from strangers
 -------------------------------------------------

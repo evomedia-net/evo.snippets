@@ -25,9 +25,10 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { connect, isIP } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, posix, resolve, win32 } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
-export const VERSION = '1.1.0'
+export const VERSION = '1.2.0'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 // ── axe-core, vendored and pinned ───────────────────────────────────────────
@@ -57,10 +58,27 @@ Where the pages come from (combine freely; duplicates are dropped)
   --urls <file>        One URL per line; # starts a comment.
   --crawl              Follow same-origin links from each page audited, breadth
                        first, until --max-pages or --depth is reached.
-  --max-pages <n>      Page cap for the whole run (default 25).
+  --max-pages <n>      Page cap for the whole run (default 25). 0 is no cap: the
+                       whole site, as far as --depth reaches.
   --depth <n>          How many links deep a crawl goes from a start page (default 2).
+  --exclude <regex>    Skip discovered pages whose URL matches (case-insensitive).
+                       Repeatable.
   --list               Print the pages that WOULD be audited, then exit 0. Turn a
                        crawl into a --urls file once and stop depending on it.
+
+Signing in (a site's pages behind its login)
+  --login <url>        Open a visible browser at this sign-in page, sign in there
+                       however the site asks (password, passkey, SSO, MFA), then
+                       press Enter in this terminal. The sweep runs with that
+                       session; the tool never sees a password.
+  --session <file>     With --login, keep the session in this file. Without it,
+                       sweep with a session kept earlier - unattended, until the
+                       site expires it. Treat the file like a password.
+  --header <h: v>      Send this request header to the site's own origin only
+                       (never to other hosts a page loads from), e.g. a staging
+                       site's basic auth. Repeatable.
+  While signed in, links that look like log-out links are skipped, so a crawl
+  does not end its own session.
 
 How each page is rendered
   --width <list>       Viewport widths, comma separated (default 1280). Each page
@@ -101,8 +119,8 @@ The browser
 Exit codes: 0 clean, 1 violations found (see --fail-on), 2 usage or environment error.`
 
 export function parseArgs(argv) {
-  const o = { urls: [], sitemap: [], urlFiles: [], crawl: false, maxPages: 25, depth: 2, list: false, widths: [1280], html: null, timeout: 30000, delay: 500, userAgent: null, tags: DEFAULT_TAGS, reflow: false, publicOnly: false, json: null, report: null, quiet: false, failOn: 'any', chrome: null, axe: null, help: false, version: false }
-  const takes = new Set(['--sitemap', '--urls', '--max-pages', '--depth', '--width', '--html', '--timeout', '--delay', '--user-agent', '--tags', '--json', '--report', '--fail-on', '--chrome', '--axe'])
+  const o = { urls: [], sitemap: [], urlFiles: [], crawl: false, maxPages: 25, depth: 2, list: false, widths: [1280], html: null, timeout: 30000, delay: 500, userAgent: null, tags: DEFAULT_TAGS, reflow: false, publicOnly: false, json: null, report: null, quiet: false, failOn: 'any', chrome: null, axe: null, login: null, session: null, headers: [], exclude: [], help: false, version: false }
+  const takes = new Set(['--sitemap', '--urls', '--max-pages', '--depth', '--width', '--html', '--timeout', '--delay', '--user-agent', '--tags', '--json', '--report', '--fail-on', '--chrome', '--axe', '--login', '--session', '--header', '--exclude'])
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (['-help', '--help', '-h', '--h', '-?'].includes(a)) { o.help = true; continue }
@@ -113,7 +131,7 @@ export function parseArgs(argv) {
       switch (a) {
         case '--sitemap': o.sitemap.push(v); break
         case '--urls': o.urlFiles.push(v); break
-        case '--max-pages': o.maxPages = positiveInt(a, v); break
+        case '--max-pages': o.maxPages = positiveInt(a, v, true); break
         case '--depth': o.depth = positiveInt(a, v, true); break
         case '--width': o.widths = v.split(',').map((w) => positiveInt(a, w.trim())); break
         case '--html': { const eq = v.indexOf('='); if (eq < 1) throw new UsageError(`--html wants attr=value, got ${v}`); o.html = [v.slice(0, eq), v.slice(eq + 1)]; break }
@@ -126,6 +144,10 @@ export function parseArgs(argv) {
         case '--fail-on': if (!['any', 'none'].includes(v)) throw new UsageError(`--fail-on wants any or none, got ${v}`); o.failOn = v; break
         case '--chrome': o.chrome = v; break
         case '--axe': o.axe = v; break
+        case '--login': if (!normalizeUrl(v)) throw new UsageError(`--login wants the sign-in page's http(s) URL, got ${v}`); o.login = normalizeUrl(v); break
+        case '--session': o.session = v; break
+        case '--header': o.headers.push(parseHeader(v)); break
+        case '--exclude': try { new RegExp(v, 'i') } catch (e) { throw new UsageError(`--exclude wants a regular expression: ${e.message}`) } o.exclude.push(v); break
       }
       continue
     }
@@ -144,6 +166,112 @@ export function parseArgs(argv) {
 }
 
 export class UsageError extends Error {}
+
+// ── signing in ──────────────────────────────────────────────────────────────
+// A session is the cookies the site set while the person signed in, plus each
+// origin's localStorage (where single-page apps keep their tokens). It is
+// captured once in a visible browser and installed into every headless one.
+
+// "Name: value", validated: an HTTP token for the name, no line breaks in the
+// value (a header that carried one could smuggle a second header).
+export function parseHeader(s) {
+  const i = s.indexOf(':')
+  const name = i > 0 ? s.slice(0, i).trim() : ''
+  const value = i > 0 ? s.slice(i + 1).trim() : ''
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) throw new UsageError(`--header wants "Name: value", got ${s}`)
+  if (/[\r\n]/.test(value)) throw new UsageError(`--header ${name}: the value cannot contain a line break`)
+  return [name, value]
+}
+
+// A log-out link, by its path: /logout, /log-out, /signout, /auth/sign-off?next=,
+// logout.php. The word has to stand alone in the URL, so /catalog-outdoor is
+// not one. Followed while signed in, it ends the session the sweep runs on.
+export const SIGNED_IN_EXCLUDE = /(^|[/_.?=&-])(log-?out|log-?off|sign-?out|sign-?off)($|[/_.?=&#-])/i
+
+// The request headers a page asks to send, with ours merged in. Ours win, by
+// name and case-insensitively, so --header replaces a value rather than
+// doubling it. Shaped for Fetch.continueRequest.
+export function withHeaders(requestHeaders, extra) {
+  const ours = new Set(extra.map(([n]) => n.toLowerCase()))
+  return [...Object.entries(requestHeaders || {}).filter(([n]) => !ours.has(n.toLowerCase())).map(([name, value]) => ({ name, value: String(value) })),
+    ...extra.map(([name, value]) => ({ name, value }))]
+}
+
+// Does a cookie for `domain` reach `host`? (RFC 6265 domain-match.)
+export function domainMatch(host, domain) {
+  const d = String(domain || '').replace(/^\./, '').toLowerCase()
+  const h = String(host || '').toLowerCase()
+  return !!d && (h === d || h.endsWith('.' + d))
+}
+
+// From what the browser reports (Network.Cookie) to what it accepts
+// (Network.CookieParam). A session cookie has no expiry to give back.
+export function toCookieParams(cookies) {
+  return (cookies || []).map((c) => {
+    const p = { name: c.name, value: c.value, domain: c.domain, path: c.path || '/', secure: !!c.secure, httpOnly: !!c.httpOnly }
+    if (c.sameSite) p.sameSite = c.sameSite
+    if (!c.session && typeof c.expires === 'number' && c.expires > 0) p.expires = c.expires
+    return p
+  })
+}
+
+// Runs before any of the page's own scripts, on every page: puts back each
+// localStorage item the page does not already have, for its own origin only.
+export function seedStorageScript(byOrigin) {
+  return `(() => { const items = (${JSON.stringify(byOrigin)})[location.origin]; if (!items) return;
+  for (const [k, v] of Object.entries(items)) { try { if (localStorage.getItem(k) === null) localStorage.setItem(k, v) } catch (e) {} } })()`
+}
+
+// The session file: cookies and localStorage, owner-read-only where the file
+// system has the notion. The cookies ARE the signed-in session; anyone holding
+// the file is signed in as that person until the site expires it.
+export function writeSession(file, session) {
+  writeFileSync(file, JSON.stringify(session, null, 1), { mode: 0o600 })
+}
+
+export function readSession(file) {
+  let s
+  try { s = JSON.parse(readFileSync(file, 'utf8')) } catch (e) { throw new UsageError(`--session ${file}: ${e.code === 'ENOENT' ? 'no such file - make one with --login and --session' : e.message}`) }
+  if (!s || s.tool !== 'wcag-sweep' || !Array.isArray(s.cookies)) throw new UsageError(`--session ${file} is not a wcag-sweep session file`)
+  return s
+}
+
+// The same page as the sign-in page, ignoring the query: where a site sends
+// someone whose session has ended.
+export function isSignInPage(url, login) {
+  try { const a = new URL(url), b = new URL(login); return a.origin === b.origin && a.pathname.replace(/\/$/, '') === b.pathname.replace(/\/$/, '') } catch { return false }
+}
+
+function waitForEnter(prompt) {
+  const rl = createInterface({ input: process.stdin, output: process.stderr })
+  return new Promise((done) => rl.question(prompt, () => { rl.close(); done() }))
+}
+
+// Open the sign-in page in a VISIBLE browser and wait for the person to sign
+// in. Then keep the cookies that reach the sites being swept - not the
+// identity provider's or anyone else's, which the sweep would never send
+// anyway - and each swept origin's localStorage.
+// `ask` is handed the browser too, so a test can play the person signing in;
+// `headless` is for that test only - a person needs a window.
+export async function captureSession(chrome, o, starts, log = console.error, ask = waitForEnter, { headless = false } = {}) {
+  if (ask === waitForEnter && !process.stdin.isTTY) throw new UsageError('--login opens a browser for you to sign in in, and waits here for Enter, so it needs a terminal. To run unattended, sign in once with --login and --session <file>, then run with --session <file>.')
+  const b = new Browser(chrome, 1280, [], { headless })
+  await b.start()
+  try {
+    await b.send('Page.navigate', { url: o.login }, b.session)
+    await ask(`\nSign in to ${new URL(o.login).host} in the browser window that opened, then press Enter here to start the sweep. `, b)
+    const hosts = [...starts.keys()].map((origin) => new URL(origin).hostname)
+    let all
+    try { all = (await b.send('Storage.getCookies', {})).cookies } catch { await b.send('Network.enable', {}, b.session); all = (await b.send('Network.getAllCookies', {}, b.session)).cookies }
+    const cookies = all.filter((c) => hosts.some((h) => domainMatch(h, c.domain)))
+    const localStorage = {}
+    for (const [origin, first] of starts) {
+      try { await b.open(first, o.timeout); localStorage[origin] = await b.evaluate('Object.fromEntries(Object.entries(localStorage))') } catch (e) { log(`could not read ${origin}'s local storage: ${e.message}`) }
+    }
+    if (!cookies.length && !Object.values(localStorage).some((v) => v && Object.keys(v).length)) log('warning: no cookies or local storage for the site were set - the sweep will run signed out')
+    return { tool: 'wcag-sweep', format: 1, captured: new Date().toISOString(), login: o.login, cookies, localStorage }
+  } finally { await b.close() }
+}
 
 function positiveInt(flag, v, allowZero = false) {
   const n = Number(v)
@@ -339,7 +467,7 @@ export function findChrome(explicit) {
 }
 
 export class Browser {
-  constructor(exe, width, flags = []) { this.exe = exe; this.width = width; this.flags = flags; this.id = 0; this.pending = new Map() }
+  constructor(exe, width, flags = [], { headless = true } = {}) { this.exe = exe; this.width = width; this.flags = flags; this.headless = headless; this.id = 0; this.pending = new Map(); this.listeners = new Map() }
   async start() {
     this.profile = mkdtempSync(join(tmpdir(), 'wcag-sweep-'))
     this.port = 9222 + Math.floor(Math.random() * 20000)
@@ -347,18 +475,44 @@ export class Browser {
     // --disable-dev-shm-usage, or --no-sandbox where the kernel sandbox is
     // unavailable. Space separated.
     const extra = (process.env.WCAG_SWEEP_CHROME_FLAGS || '').split(/\s+/).filter(Boolean)
-    this.proc = spawn(this.exe, ['--headless=new', `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--hide-scrollbars', '--mute-audio', `--window-size=${this.width},900`, ...this.flags, ...extra, 'about:blank'], { stdio: 'ignore' })
+    // Headed only to let a person sign in (--login): a window they can use.
+    const mode = this.headless ? ['--headless=new', '--hide-scrollbars'] : []
+    this.proc = spawn(this.exe, [...mode, `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--mute-audio', `--window-size=${this.width},900`, ...this.flags, ...extra, 'about:blank'], { stdio: 'ignore' })
     let wsUrl
     for (let i = 0; i < 150 && !wsUrl; i++) { try { const r = await fetch(`http://127.0.0.1:${this.port}/json/version`); if (r.ok) wsUrl = (await r.json()).webSocketDebuggerUrl } catch {} if (!wsUrl) await sleep(200) }
     if (!wsUrl) throw new Error('the browser did not come up')
     this.ws = new WebSocket(wsUrl)
     await new Promise((res, rej) => { this.ws.onopen = res; this.ws.onerror = rej })
-    this.ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && this.pending.has(d.id)) { const p = this.pending.get(d.id); this.pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result) } }
+    this.ws.onmessage = (m) => {
+      const d = JSON.parse(m.data)
+      if (d.id && this.pending.has(d.id)) { const p = this.pending.get(d.id); this.pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result) }
+      else if (d.method && this.listeners.has(d.method)) for (const fn of this.listeners.get(d.method)) fn(d.params, d.sessionId)
+    }
     const { targetId } = await this.send('Target.createTarget', { url: 'about:blank' })
     this.session = (await this.send('Target.attachToTarget', { targetId, flatten: true })).sessionId
     await this.send('Page.enable', {}, this.session)
     await this.send('Runtime.enable', {}, this.session)
-    await this.send('Emulation.setDeviceMetricsOverride', { width: this.width, height: 900, deviceScaleFactor: 1, mobile: this.width < 768 }, this.session)
+    if (this.headless) await this.send('Emulation.setDeviceMetricsOverride', { width: this.width, height: 900, deviceScaleFactor: 1, mobile: this.width < 768 }, this.session)
+  }
+  on(method, fn) { if (!this.listeners.has(method)) this.listeners.set(method, []); this.listeners.get(method).push(fn) }
+  // Before the first page: the signed-in session, and any --header. The
+  // headers go only to the swept origins: requests to them are paused and
+  // continued with the headers added, and nothing else is touched - a
+  // staging site's credentials never reach a CDN or an analytics host.
+  async prepare({ cookies = [], storageScript = null, headers = [], origins = new Set() } = {}) {
+    if (cookies.length) {
+      try { await this.send('Storage.setCookies', { cookies }) } catch { await this.send('Network.enable', {}, this.session); await this.send('Network.setCookies', { cookies }, this.session) }
+    }
+    if (storageScript) await this.send('Page.addScriptToEvaluateOnNewDocument', { source: storageScript }, this.session)
+    if (headers.length && origins.size) {
+      this.on('Fetch.requestPaused', (p, sessionId) => {
+        let ours = false
+        try { ours = origins.has(new URL(p.request.url).origin) } catch {}
+        const params = ours ? { requestId: p.requestId, headers: withHeaders(p.request.headers, headers) } : { requestId: p.requestId }
+        this.send('Fetch.continueRequest', params, sessionId).catch(() => {})
+      })
+      await this.send('Fetch.enable', { patterns: [...origins].map((origin) => ({ urlPattern: `${origin}/*`, requestStage: 'Request' })) }, this.session)
+    }
   }
   send(method, params = {}, sessionId) { const id = ++this.id; return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.ws.send(JSON.stringify({ id, method, params, sessionId })) }) }
   async setUserAgent(s) { await this.send('Network.setUserAgentOverride', { userAgent: s }, this.session) }
@@ -448,20 +602,40 @@ export async function sweep(o, log = console.error) {
   if (!seeds.length) throw new UsageError('no pages: give URLs, --sitemap or --urls (try -help)')
   const queue = [...new Set(seeds)].map((url) => ({ url, depth: 0 }))
   const seen = new Set(queue.map((q) => q.url))
-  const report = { tool: 'wcag-sweep', version: VERSION, generated: new Date().toISOString(), axe: axeNote, options: { widths: o.widths, tags: o.tags, html: o.html, crawl: o.crawl, maxPages: o.maxPages, depth: o.depth, reflow: o.reflow, publicOnly: o.publicOnly }, pages: [], skipped: [] }
+  const report = { tool: 'wcag-sweep', version: VERSION, generated: new Date().toISOString(), axe: axeNote, options: { widths: o.widths, tags: o.tags, html: o.html, crawl: o.crawl, maxPages: o.maxPages, depth: o.depth, reflow: o.reflow, publicOnly: o.publicOnly, exclude: o.exclude || [], signedIn: null }, pages: [], skipped: [] }
 
   if (o.list && !o.crawl) { for (const q of queue) console.log(q.url); return { report, exit: 0 } }
+
+  // Signed in: a session captured now in a visible browser (--login), or one
+  // kept earlier (--session), and/or request headers (--header).
+  const headers = o.headers || []
+  const starts = new Map()
+  for (const q of queue) { const origin = new URL(q.url).origin; if (!starts.has(origin)) starts.set(origin, q.url) }
+  let session = null
+  if (o.login) {
+    session = await captureSession(chrome, o, starts, log, o.ask)
+    if (o.session) { writeSession(o.session, session); log(`Session kept in ${o.session}. Anyone with this file is signed in as you until the site ends the session: keep it out of shared folders and repositories.`) }
+  } else if (o.session) session = readSession(o.session)
+  const signedIn = Boolean(session || headers.length)
+  if (session) report.options.signedIn = o.login ? `signed in at ${o.login}` : `signed in with a session kept on ${String(session.captured).slice(0, 10)}`
+  else if (headers.length) report.options.signedIn = `with the ${headers.map(([n]) => n).join(', ')} header${headers.length === 1 ? '' : 's'}`
+  const exclude = [...(o.exclude || []).map((x) => new RegExp(x, 'i')), ...(signedIn ? [SIGNED_IN_EXCLUDE] : [])]
+  const prepared = signedIn ? {
+    cookies: session ? toCookieParams(session.cookies) : [],
+    storageScript: session && Object.values(session.localStorage || {}).some((v) => v && Object.keys(v).length) ? seedStorageScript(session.localStorage) : null,
+    headers, origins: new Set(starts.keys()),
+  } : null
 
   // Under --public-only the browser reaches the network only through the filter.
   const egress = o.publicOnly ? await startEgressFilter({ onRefuse: o.quiet ? null : (host, why) => log(`refused a request: ${why}`) }) : null
   const flags = egress ? egress.chromeFlags() : []
   const browsers = new Map()
-  const browserFor = async (w) => { if (!browsers.has(w)) { const b = new Browser(chrome, w, flags); await b.start(); await b.setUserAgent(ua(o.userAgent)); browsers.set(w, b) } return browsers.get(w) }
+  const browserFor = async (w) => { if (!browsers.has(w)) { const b = new Browser(chrome, w, flags); await b.start(); await b.setUserAgent(ua(o.userAgent)); if (prepared) await b.prepare(prepared); browsers.set(w, b) } return browsers.get(w) }
   if (o.reflow && !o.widths.includes(320)) await browserFor(320)
 
   try {
     let audited = 0
-    while (queue.length && audited < o.maxPages) {
+    while (queue.length && (o.maxPages === 0 || audited < o.maxPages)) {
       const { url, depth } = queue.shift()
       if (!looksLikePage(url)) { report.skipped.push({ url, why: 'not a page by its extension' }); continue }
       if (o.publicOnly) { try { await assertPublicHost(url) } catch (e) { report.skipped.push({ url, why: e.message }); continue } }
@@ -478,6 +652,13 @@ export async function sweep(o, log = console.error) {
         if (!sameOrigin(opened.url, url)) { report.skipped.push({ url, why: `redirected off-site to ${opened.url}` }); page.results = []; break }
         if (o.publicOnly && opened.url !== url) { try { await assertPublicHost(opened.url) } catch (e) { report.skipped.push({ url, why: e.message }); page.results = []; break } }
         page.title = opened.title
+        // The site sent a signed-in sweep to its sign-in page: the session has
+        // ended (expired, or signed out elsewhere). Said once, loudly, and in
+        // the report - every page after this is a signed-out page.
+        if (session && session.login && !report.sessionLost && isSignInPage(opened.url, session.login) && !isSignInPage(url, session.login)) {
+          report.sessionLost = { at: url }
+          log(`warning: ${url} opened the sign-in page - the session has ended, and pages from here on are swept signed out`)
+        }
         if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
         if (o.list) { if (wi === 0) discovered = await b.evaluate(LINKS); continue }
         await b.evaluate(axeSource + '; true')
@@ -502,12 +683,15 @@ export async function sweep(o, log = console.error) {
         for (const href of discovered) {
           const n = normalizeUrl(href, url)
           if (!n || seen.has(n) || !sameOrigin(n, url) || !looksLikePage(n)) continue
-          seen.add(n); queue.push({ url: n, depth: depth + 1 })
+          seen.add(n)
+          const hit = exclude.find((r) => r.test(n))
+          if (hit) { report.skipped.push({ url: n, why: hit === SIGNED_IN_EXCLUDE ? 'a log-out link, not followed while signed in' : `matches --exclude ${hit.source}` }); continue }
+          queue.push({ url: n, depth: depth + 1 })
         }
       }
       if (o.delay) await sleep(o.delay)
     }
-    if (queue.length) report.capped = { atPages: o.maxPages, left: queue.length }
+    if (queue.length && o.maxPages) report.capped = { atPages: o.maxPages, left: queue.length }
   } finally {
     for (const b of browsers.values()) await b.close()
     if (egress) { report.refused = egress.refused; await egress.close() }
@@ -545,7 +729,7 @@ export function summarize(report) {
 
 export function formatSummary(report) {
   const s = report.summary
-  const lines = [`${s.pages} page${s.pages === 1 ? '' : 's'} at ${s.widths.join(', ')}px — ${s.violationNodes} node${s.violationNodes === 1 ? '' : 's'} failing across ${s.rules.length} rule${s.rules.length === 1 ? '' : 's'}${report.options.reflow ? `; reflow problems on ${s.reflowPages}` : ''}${s.errors ? `; ${s.errors} page load${s.errors === 1 ? '' : 's'} failed` : ''}${s.skipped ? `; ${s.skipped} skipped` : ''}${report.refused ? `; ${report.refused} request${report.refused === 1 ? '' : 's'} to non-public addresses refused` : ''}${report.capped ? `; stopped at ${report.capped.atPages} pages with ${report.capped.left} left` : ''}.`]
+  const lines = [`${s.pages} page${s.pages === 1 ? '' : 's'} at ${s.widths.join(', ')}px — ${s.violationNodes} node${s.violationNodes === 1 ? '' : 's'} failing across ${s.rules.length} rule${s.rules.length === 1 ? '' : 's'}${report.options.reflow ? `; reflow problems on ${s.reflowPages}` : ''}${s.errors ? `; ${s.errors} page load${s.errors === 1 ? '' : 's'} failed` : ''}${s.skipped ? `; ${s.skipped} skipped` : ''}${report.refused ? `; ${report.refused} request${report.refused === 1 ? '' : 's'} to non-public addresses refused` : ''}${report.capped ? `; stopped at ${report.capped.atPages} pages with ${report.capped.left} left` : ''}${report.options.signedIn ? `; ${report.options.signedIn}` : ''}${report.sessionLost ? `; the session ended at ${report.sessionLost.at}` : ''}.`]
   for (const r of s.rules) lines.push(`  ${String(r.nodes).padStart(5)}  ${r.id.padEnd(32)} ${r.impact.padEnd(9)} ${r.pages} page${r.pages === 1 ? '' : 's'}  ${r.help}`)
   return lines.join('\n')
 }
@@ -591,12 +775,13 @@ caption{text-align:left;font-weight:600;padding:.3rem 0}pre{white-space:pre-wrap
 </head>
 <body>
 <a class="skip" href="#summary">Skip to summary</a>
-<header><h1>WCAG 2.2 sweep of ${esc(host)}</h1><p class="lede">${esc(when)} · ${s.pages} page${s.pages === 1 ? '' : 's'} at ${esc(s.widths.join(', '))}px · ${esc(report.axe)} · rules ${esc(report.options.tags.join(', '))}${report.options.html ? ` · with <code>&lt;html ${esc(report.options.html[0])}="${esc(report.options.html[1])}"&gt;</code>` : ''}</p></header>
+<header><h1>WCAG 2.2 sweep of ${esc(host)}</h1><p class="lede">${esc(when)} · ${s.pages} page${s.pages === 1 ? '' : 's'} at ${esc(s.widths.join(', '))}px · ${esc(report.axe)} · rules ${esc(report.options.tags.join(', '))}${report.options.html ? ` · with <code>&lt;html ${esc(report.options.html[0])}="${esc(report.options.html[1])}"&gt;</code>` : ''}${report.options.signedIn ? ` · ${esc(report.options.signedIn)}` : ''}</p></header>
 <main>
 <h2 id="summary">Summary</h2>
 ${s.violationNodes === 0 ? `<p class="ok">No violations of the WCAG 2.2 A and AA rules axe-core can test, on any page at any width.</p>` : `<p><strong>${s.violationNodes}</strong> element${s.violationNodes === 1 ? '' : 's'} fail${s.violationNodes === 1 ? 's' : ''} across <strong>${s.rules.length}</strong> rule${s.rules.length === 1 ? '' : 's'}.</p>`}
 ${report.options.reflow ? `<p>Reflow at 320px: ${s.reflowPages === 0 ? 'every page fits and nothing clips under WCAG text spacing.' : `<strong>${s.reflowPages}</strong> page${s.reflowPages === 1 ? '' : 's'} with sideways overflow or clipped text.`}</p>` : ''}
 ${report.refused ? `<p>The pages asked for ${report.refused} resource${report.refused === 1 ? '' : 's'} at addresses that are not on the public internet. Those were refused and not loaded, so anything they would have added to a page was not audited.</p>` : ''}
+${report.sessionLost ? `<p><strong>The session ended</strong> at <a href="${esc(report.sessionLost.at)}">${esc(report.sessionLost.at)}</a>, which opened the sign-in page: that page and those after it were swept signed out. Sign in again and sweep from there.</p>` : ''}
 ${report.capped ? `<p>The sweep stopped at ${report.capped.atPages} pages with ${report.capped.left} more discovered. Raise <code>--max-pages</code> to go further.</p>` : ''}
 <p class="lede">What a machine can test is necessary, not sufficient: keyboard order, meaningful names, captions and the sense of the text still need a person. A clean run here means the automated half is clean.</p>
 ${s.rules.length ? `<table><caption>By rule</caption><thead><tr><th scope="col">Rule</th><th scope="col">Impact</th><th scope="col">Elements</th><th scope="col">Pages</th><th scope="col">What it means</th></tr></thead><tbody>${s.rules.map((r) => `<tr><td><a href="#r-${esc(r.id)}">${esc(r.id)}</a></td><td class="${esc(r.impact)}">${esc(r.impact)}</td><td>${r.nodes}</td><td>${r.pages}</td><td>${esc(r.help)}</td></tr>`).join('')}</tbody></table>` : ''}
