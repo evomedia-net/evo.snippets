@@ -133,6 +133,16 @@ test('report: self-contained, escaped, and says what it checked', () => {
   assert.match(html, /timed out after 30000 ms/)
   assert.match(html, /brochure\.pdf — not a page by its extension/)
   assert.match(html, /Skip to summary/)
+  // Reflow (1.4.10): only long tokens (URLs, selectors) may break, each table
+  // sits in its own sideways-scrolling box, and By rule is three columns.
+  assert.match(html, /td a,td code,td small\{overflow-wrap:anywhere\}/)
+  assert.doesNotMatch(html, /th,td\{[^}]*overflow-wrap/)
+  assert.equal((html.match(/<div class="wide"><table>/g) || []).length, (html.match(/<table>/g) || []).length)
+  assert.doesNotMatch(html, /tabindex/)
+  assert.match(html, /<th scope="col">Rule<\/th><th scope="col">Found<\/th><th scope="col">What it means<\/th>/)
+  assert.match(html, /<span class="impact serious">serious<\/span><\/td><td>1 element on 1 page<\/td>/)
+  // Focus visible in both schemes, in the text's own colour, not left to the browser.
+  assert.match(html, /:focus-visible\{outline:3px solid currentColor/)
   const clean = sample(); clean.pages[0].results[0].violations = []; clean.pages[1].reflow = { overflow: 0, clipped: [] }; clean.summary = summarize(clean)
   assert.match(renderHtml(clean), /No violations of the WCAG 2\.2 A and AA rules/)
 })

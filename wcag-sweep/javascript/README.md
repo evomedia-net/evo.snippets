@@ -48,7 +48,9 @@ node wcag-sweep.mjs --sitemap https://example.com/sitemap.xml --width 1280,375 -
   resources. A summary, a table of rules, a table of pages, and for every rule
   the pages, the elements (as CSS selectors) and axe-core's own fix text. It is
   readable with a screen reader, in dark mode, and on a phone, which is the least
-  an accessibility report can do.
+  an accessibility report can do: at 320px the page never scrolls sideways (only
+  long URLs and selectors wrap, and a table that needs more room scrolls inside
+  its own box, from the keyboard too), and focus shows in the report's own colours.
 - **`--json file.json`**: everything, for your own tooling.
 
 ## What it checks
