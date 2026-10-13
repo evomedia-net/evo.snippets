@@ -28,7 +28,7 @@ import { dirname, join, posix, resolve, win32 } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
-export const VERSION = '1.2.0'
+export const VERSION = '1.2.1'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 // ── axe-core, vendored and pinned ───────────────────────────────────────────
@@ -746,7 +746,7 @@ export function renderHtml(report) {
     for (const p of report.pages) for (const res of p.results) if (!res.error) for (const v of res.violations) if (v.id === r.id) for (const n of v.nodes) rows.push(`<tr><td><a href="${esc(p.url)}">${esc(p.url)}</a></td><td>${res.width}</td><td><code>${esc(n.target)}</code></td><td><pre>${esc(n.fix)}</pre></td></tr>`)
     return `<section aria-labelledby="r-${esc(r.id)}"><h3 id="r-${esc(r.id)}">${esc(r.id)} <span class="impact ${esc(r.impact)}">${esc(r.impact)}</span></h3>
 <p>${esc(r.help)}. ${r.nodes} element${r.nodes === 1 ? '' : 's'} on ${r.pages} page${r.pages === 1 ? '' : 's'}. <a href="${esc(r.helpUrl)}">How to fix it (axe-core)</a>. WCAG: ${esc(r.tags.filter((t) => /^wcag\d{3,}$/.test(t)).map((t) => t.replace(/^wcag(\d)(\d)(\d+)$/, '$1.$2.$3')).join(', ') || 'A/AA')}.</p>
-<table><caption>Where ${esc(r.id)} fails</caption><thead><tr><th scope="col">Page</th><th scope="col">Width</th><th scope="col">Element</th><th scope="col">What to change</th></tr></thead><tbody>${rows.join('')}</tbody></table></section>`
+<div class="wide"><table><caption>Where ${esc(r.id)} fails</caption><thead><tr><th scope="col">Page</th><th scope="col">Width</th><th scope="col">Element</th><th scope="col">What to change</th></tr></thead><tbody>${rows.join('')}</tbody></table></div></section>`
   }).join('\n')
   const pageRows = report.pages.map((p) => {
     const counts = p.results.map((res) => res.error ? `${res.width}px: failed to load (${esc(res.error)})` : `${res.width}px: ${res.violations.reduce((n, v) => n + v.nodes.length, 0)}`).join('<br>')
@@ -770,7 +770,9 @@ caption{text-align:left;font-weight:600;padding:.3rem 0}pre{white-space:pre-wrap
 .impact{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;padding:.1rem .45rem;border:1px solid currentColor;border-radius:.3rem;vertical-align:middle}
 .critical{color:var(--crit)}.serious{color:var(--ser)}.moderate{color:var(--mod)}.minor{color:var(--min)}
 .lede{color:var(--muted)}.ok{font-weight:600}a{color:inherit}
+td a,td code,td small{overflow-wrap:anywhere}.wide{overflow-x:auto}.wide>table{margin:.6rem 0}td .impact{display:inline-block;margin-top:.25rem}
 .skip{position:absolute;left:-999px}.skip:focus{position:static}
+:focus-visible{outline:3px solid currentColor;outline-offset:2px}
 </style>
 </head>
 <body>
@@ -784,9 +786,9 @@ ${report.refused ? `<p>The pages asked for ${report.refused} resource${report.re
 ${report.sessionLost ? `<p><strong>The session ended</strong> at <a href="${esc(report.sessionLost.at)}">${esc(report.sessionLost.at)}</a>, which opened the sign-in page: that page and those after it were swept signed out. Sign in again and sweep from there.</p>` : ''}
 ${report.capped ? `<p>The sweep stopped at ${report.capped.atPages} pages with ${report.capped.left} more discovered. Raise <code>--max-pages</code> to go further.</p>` : ''}
 <p class="lede">What a machine can test is necessary, not sufficient: keyboard order, meaningful names, captions and the sense of the text still need a person. A clean run here means the automated half is clean.</p>
-${s.rules.length ? `<table><caption>By rule</caption><thead><tr><th scope="col">Rule</th><th scope="col">Impact</th><th scope="col">Elements</th><th scope="col">Pages</th><th scope="col">What it means</th></tr></thead><tbody>${s.rules.map((r) => `<tr><td><a href="#r-${esc(r.id)}">${esc(r.id)}</a></td><td class="${esc(r.impact)}">${esc(r.impact)}</td><td>${r.nodes}</td><td>${r.pages}</td><td>${esc(r.help)}</td></tr>`).join('')}</tbody></table>` : ''}
+${s.rules.length ? `<div class="wide"><table><caption>By rule</caption><thead><tr><th scope="col">Rule</th><th scope="col">Found</th><th scope="col">What it means</th></tr></thead><tbody>${s.rules.map((r) => `<tr><td><a href="#r-${esc(r.id)}">${esc(r.id)}</a><br><span class="impact ${esc(r.impact)}">${esc(r.impact)}</span></td><td>${r.nodes} element${r.nodes === 1 ? '' : 's'} on ${r.pages} page${r.pages === 1 ? '' : 's'}</td><td>${esc(r.help)}</td></tr>`).join('')}</tbody></table></div>` : ''}
 <h2 id="pages">Pages</h2>
-<table><caption>Failing elements per page and width</caption><thead><tr><th scope="col">Page</th><th scope="col">Failing elements</th>${report.options.reflow ? '<th scope="col">Reflow at 320px</th>' : ''}</tr></thead><tbody>${pageRows}</tbody></table>
+<div class="wide"><table><caption>Failing elements per page and width</caption><thead><tr><th scope="col">Page</th><th scope="col">Failing elements</th>${report.options.reflow ? '<th scope="col">Reflow at 320px</th>' : ''}</tr></thead><tbody>${pageRows}</tbody></table></div>
 ${s.rules.length ? `<h2 id="findings">Findings</h2>${ruleSections}` : ''}
 ${skipped}
 </main>
