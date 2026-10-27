@@ -26,7 +26,11 @@ and the release moves them under its version.
 - **confetti-burst:** bring playground.js back in step with the site, with two accessibility fixes ([#40](https://github.com/evomedia-net/evo.snippets/pull/40))
 - **wcag-sweep:** keep vendored files byte-for-byte on every checkout so the axe-core checksum holds on Windows ([#38](https://github.com/evomedia-net/evo.snippets/pull/38))
 
-## v0.0.0.1.3 - 2026-10-08
+### Documentation
+
+- **changelog:** the fleet format, evo.polaris's with no date on version headings; the .txt twins underline a third-level heading with ~ ([#49](https://github.com/evomedia-net/evo.snippets/pull/49))
+
+## v0.0.0.1.3
 
 ### Added
 

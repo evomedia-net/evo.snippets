@@ -116,14 +116,14 @@ Common things you will want
 ---------------------------
 
 A different threshold
----------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 The default is 2,500 characters. To find everything above 500:
 
     ./run.sh /path/to/project --limit 500
 
 Just the count, not every line
-------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     ./run.sh /path/to/project --summary
 
@@ -131,7 +131,7 @@ Totals per file and per rule — useful on a large codebase where the full listi
 runs off the screen.
 
 Only the certain matches
-------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Some patterns are genuinely ambiguous. .max(5000) is a character limit on a
 string and an item count on an array, and the scanner cannot always tell which.
@@ -140,7 +140,7 @@ Those print with a trailing (?). To hide them:
     ./run.sh /path/to/project --high-only
 
 Fields with no limit at all
----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 A text box with no maximum, backed by a column that accepts anything, is the
 unbounded case — arguably worse than a generous limit, and invisible by default
@@ -149,7 +149,7 @@ because there is no number to find:
     ./run.sh /path/to/project --include-unbounded
 
 A report file to share
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
     ./run.sh /path/to/project --md
 
@@ -160,7 +160,7 @@ name is timestamped, so two scans never overwrite each other.
 --csv, --json and --txt work the same way.
 
 Only certain languages
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
     ./run.sh /path/to/project +ts +json     # only TypeScript and JSON
     ./run.sh /path/to/project -json         # everything except JSON
@@ -193,7 +193,7 @@ If something did not work
 -------------------------
 
 It exits with a message about the Node version
-----------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Your Node is older than 22.6, which cannot run TypeScript at all. Either upgrade
 from nodejs.org (https://nodejs.org), or use the
@@ -201,7 +201,7 @@ Python twin (../python) — identical flags,
 identical output.
 
 "Unknown file extension .ts" or a syntax error on the first line
-----------------------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You ran the file with a Node that does not strip types. Use the launcher rather
 than calling node directly, or add the flag yourself:
@@ -209,12 +209,12 @@ than calling node directly, or add the flag yourself:
     node --experimental-strip-types findInputLimits.ts /path/to/project
 
 "permission denied" running ./run.sh
-------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Mark it runnable: chmod +x run.sh. This is a one-off.
 
 PowerShell refuses to run run.ps1
----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Windows blocks unsigned scripts by default. Either allow local scripts for that
 window only:
@@ -226,7 +226,7 @@ or, on Node 23.6+, call the scanner directly:
     node findInputLimits.ts C:\path\to\your-project
 
 It found nothing and I expected findings
-----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Three likely reasons, in order:
 
@@ -238,7 +238,7 @@ Three likely reasons, in order:
    --include-unbounded.
 
 It flagged something that is not a character limit
---------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 That is what the (?) marker means — a medium-confidence match. length: 5000
 is a column width in one framework and an array size in another. Use

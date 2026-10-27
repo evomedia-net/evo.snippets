@@ -208,7 +208,7 @@ The four worth trying first:
 | colors | ['#ff0000', '#00ff00'] | Your own colours. |
 
 Choosing a position
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 origin can be a number from 1 to 25, laid out over the screen like the keys on
 a phone:
@@ -224,7 +224,7 @@ left corner. The edges aim themselves inward, so confetti fired from a corner
 still lands on the screen.
 
 Two cannons
------------
+~~~~~~~~~~~
 
 Fire it more than once, slightly apart:
 
@@ -244,7 +244,7 @@ If something did not work
 Work down this list — it is roughly in order of how often each one is the cause.
 
 Nothing happens when I click
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Check the file name first. In your folder, is the file called index.html
 or index.html.txt? Windows hides the .txt by default. In File Explorer turn
@@ -255,7 +255,7 @@ getElementById('party') in the script have to match exactly, including
 capital letters.
 
 I get an error mentioning confettiBurst
----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Open the browser console — press F12, then click the Console tab.
 
@@ -265,7 +265,7 @@ reload, and look for confetti.js in red with a 404 next to it. 404 means
 "no file there" — go back to the table in Part 2, Step 2.
 
 The confetti is behind something / I cannot see it
---------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The confetti draws on a layer over the whole page, but some page layouts can trap
 it underneath. If your page has a big wrapper element with a CSS transform,
@@ -273,7 +273,7 @@ filter, or its own z-index, try moving your <script> block out of that
 element, closer to the bottom of the page.
 
 It looks like a firework, not paper
------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 It is being thrown too hard. Lower velocity, or raise acceleration so it
 slows down faster:
@@ -286,13 +286,13 @@ write-up of the physics (MATH.md) if you are
 curious.
 
 It is slow, or my phone struggles
----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Lower count. Every piece is drawn individually, so 400 pieces is four times the
 work of 100. Around 200 is comfortable on a laptop, around 80 on a phone.
 
 I asked for 5000 pieces and got 2000
-------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 That is on purpose. count is capped at 2000, and the browser console will tell
 you when it caps. Beyond that a page can freeze, which is a worse experience than
