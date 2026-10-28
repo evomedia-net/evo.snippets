@@ -28,7 +28,7 @@ Snippets
 --------
 
 find-oversized-input-limits
----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Finds every declared user-input character limit above a threshold, across every
 common fullstack — HTML, React, Angular, Django, Pydantic, Zod, Laravel, Rails,
@@ -46,7 +46,7 @@ Every flag, with a command you can paste:
 find-oversized-input-limits/COMMAND.md.
 
 confetti-burst
---------------
+~~~~~~~~~~~~~~
 
 A confetti burst that falls like paper rather than sparks — air drag,
 tumble-driven flutter, and a numpad grid of firing positions.
@@ -62,7 +62,7 @@ Every option, with a call you can paste:
 confetti-burst/COMMAND.md.
 
 wcag-sweep
-----------
+~~~~~~~~~~
 
 Crawls a site and runs axe-core's WCAG 2.2 Level A and AA rules on every page,
 in the Chrome or Edge already on your machine. A sitemap, a crawl or a list in;

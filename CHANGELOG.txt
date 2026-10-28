@@ -15,24 +15,29 @@ Unreleased
 ----------
 
 Added
------
+~~~~~
 
 - wcag-sweep: sweep a site behind its sign-in, and the whole of a site with no page cap (#44 (https://github.com/evomedia-net/evo.snippets/pull/44))
 - wcag-sweep: whole-site WCAG 2.2 A/AA sweep with axe-core in headless Chrome, with crawl, sitemap, reflow check and an HTML report (#36 (https://github.com/evomedia-net/evo.snippets/pull/36))
 
 Fixed
------
+~~~~~
 
 - wcag-sweep: keep reports from scrolling sideways at 320px, and give them their own focus ring (#46 (https://github.com/evomedia-net/evo.snippets/pull/46))
 - wcag-sweep: send every request a page makes through a public-only egress filter (#42 (https://github.com/evomedia-net/evo.snippets/pull/42))
 - confetti-burst: bring playground.js back in step with the site, with two accessibility fixes (#40 (https://github.com/evomedia-net/evo.snippets/pull/40))
 - wcag-sweep: keep vendored files byte-for-byte on every checkout so the axe-core checksum holds on Windows (#38 (https://github.com/evomedia-net/evo.snippets/pull/38))
 
-v0.0.0.1.3 - 2026-10-08
------------------------
+Documentation
+~~~~~~~~~~~~~
+
+- changelog: the fleet format, evo.polaris's with no date on version headings; the .txt twins underline a third-level heading with ~ (#49 (https://github.com/evomedia-net/evo.snippets/pull/49))
+
+v0.0.0.1.3
+----------
 
 Added
------
+~~~~~
 
 - security policy, and twins that are generated rather than remembered (#29 (https://github.com/evomedia-net/evo.snippets/pull/29))
 - confetti-burst: sound controls, the pop/cheer technique, and the credit (#25 (https://github.com/evomedia-net/evo.snippets/pull/25))
@@ -46,7 +51,7 @@ Added
 - add evo.snippets with find-oversized-input-limits scanner
 
 Changed
--------
+~~~~~~~
 
 - group snippets by project, then language, and add a COMMAND reference to each (#27 (https://github.com/evomedia-net/evo.snippets/pull/27))
 - confetti-burst: mirror the panel changes from the site (#22 (https://github.com/evomedia-net/evo.snippets/pull/22))
@@ -54,7 +59,7 @@ Changed
 - group snippets by language folder (python/find-oversized-input-limits) (#1 (https://github.com/evomedia-net/evo.snippets/pull/1))
 
 Fixed
------
+~~~~~
 
 - confetti-burst: mirror the aim-panel column headers from the site (#28 (https://github.com/evomedia-net/evo.snippets/pull/28))
 - confetti-burst: a looping burst went silent after the first round (#26 (https://github.com/evomedia-net/evo.snippets/pull/26))
@@ -63,7 +68,7 @@ Fixed
 - scrub the local machine path from every usage example and add a check that refuses them (#4 (https://github.com/evomedia-net/evo.snippets/pull/4))
 
 Documentation
--------------
+~~~~~~~~~~~~~
 
 - confetti-burst: link the live playground with a Try it! line (#34 (https://github.com/evomedia-net/evo.snippets/pull/34))
 - confetti-burst: add MATH.md, the derivations behind the fall (#21 (https://github.com/evomedia-net/evo.snippets/pull/21))
@@ -71,7 +76,7 @@ Documentation
 - note that no-local-paths is now a required check on main (#6 (https://github.com/evomedia-net/evo.snippets/pull/6))
 
 Maintenance
------------
+~~~~~~~~~~~
 
 - ci: re-run a test run once when a job in it times out (#33 (https://github.com/evomedia-net/evo.snippets/pull/33))
 - ci: stop a hung test run after 5 minutes instead of GitHub's 6 hours (#32 (https://github.com/evomedia-net/evo.snippets/pull/32))

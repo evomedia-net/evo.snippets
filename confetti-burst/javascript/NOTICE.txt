@@ -26,14 +26,14 @@ License rather than CC0. That distinction matters: CC0 content carries no
 restrictions, and this does.
 
 What the licence allows
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 An irrevocable, worldwide, perpetual, non-exclusive, royalty-free right
 to download, use, copy, modify or adapt it for **commercial or
 non-commercial** purposes. No attribution required.
 
 The restriction that applies to a snippet like this
----------------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 > You cannot sell or distribute the Content (either in digital or
 > physical form) on a Standalone basis … as an image, audio, video,
@@ -56,7 +56,7 @@ something you distribute:
   part of a trade name — the licence forbids all of those.
 
 Or bring your own
------------------
+~~~~~~~~~~~~~~~~~
 
 The demo's Use sound control takes any audio file from your machine,
 so nothing here depends on this particular clip. The renderer itself has

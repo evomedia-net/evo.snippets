@@ -218,7 +218,7 @@ not covered by this repository's MIT licence. See NOTICE.md
 before shipping it anywhere.
 
 One cheer, many pops
---------------------
+~~~~~~~~~~~~~~~~~~~~
 
 The bundled clip is two sounds with a silent gap between them — a pop peaking at
 0.20s and decayed by 0.56s, silence to 0.78s, then a crowd until it fades out
