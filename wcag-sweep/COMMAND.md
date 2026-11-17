@@ -119,7 +119,7 @@ happens once, in a browser window you can use.
 | --- | --- |
 | `--tags <list>` | axe-core tags to run. Default `wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa` — WCAG 2.0, 2.1 and 2.2, Level A and AA, nothing else. |
 | `--reflow` | Also measure, at 320px, sideways overflow of the page (1.4.10) and text that clips when WCAG's spacing overrides are applied (1.4.12). |
-| `--public-only` | Refuse any address whose host resolves to a private, loopback, link-local or carrier-grade NAT address, or is named `localhost`, `*.localhost` or `*.local` — before the first request and again after a redirect. For a scanner that takes addresses from strangers. |
+| `--public-only` | Refuse any address whose host resolves to a private, loopback, link-local or carrier-grade NAT address, is named `localhost`, `*.localhost` or `*.local`, or has no dot in its name — before the first request and again after a redirect. Everything a page loads, and every sitemap, is held to the same rule. For a scanner that takes addresses from strangers. |
 
 ```
 ./run.sh https://example.com --crawl --reflow

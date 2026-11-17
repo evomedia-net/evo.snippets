@@ -19,6 +19,7 @@
 
 import { spawn } from 'node:child_process'
 import { createServer, request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { createHash } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -103,9 +104,10 @@ What is checked
                        sideways overflow, and text that clips when WCAG's spacing
                        overrides are applied.
   --public-only        Refuse any page whose host resolves to a private, loopback or
-                       link-local address, including after redirects, and send every
-                       request a page makes (images, scripts, frames, fetch,
-                       WebSockets) through a filter that refuses the same addresses.
+                       link-local address, or has no dot in its name, including
+                       after redirects, and send every request a page makes
+                       (images, scripts, frames, fetch, WebSockets) through a
+                       filter that refuses the same. Sitemaps are held to it too.
                        For a scanner that takes addresses from strangers; off by
                        default so a dev server on localhost can be audited.
 
@@ -328,7 +330,7 @@ export function isPrivateAddress(ip) {
     if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return isPrivateAddress(v4(g[6], g[7])) // IPv4-mapped
     if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return isPrivateAddress(v4(g[6], g[7])) // NAT64
     if (g[0] === 0x2002) return isPrivateAddress(v4(g[1], g[2])) // 6to4
-    return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xff00) === 0xff00 // unique local, link-local, multicast
+    return (g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00 // unique local, link-local, site-local (deprecated, still routed in places), multicast
   }
   return true // not an address at all: refuse
 }
@@ -345,11 +347,68 @@ function ipv6Groups(ip) {
   return [...h, ...fill, ...tl].map((x) => parseInt(x, 16))
 }
 
+// A name that is local whatever it resolves to: localhost and its subdomains,
+// mDNS names, and any name with no dot in it. `db` or `intranet` is a name on
+// the network running the scan, never a host on the public internet, and its
+// address is only as private as that network's addressing happens to be - a
+// container network with routable IPv6 hands out public-looking ones.
+export function isLocalName(host) {
+  return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || !host.includes('.')
+}
+
+// Is this host on the public internet? One lookup, here, and the answer is the
+// addresses that were checked, so a caller can connect to exactly those:
+// looking the name up again may get a different answer. A trailing dot is
+// dropped first, so `localhost.` is `localhost`. `resolve`, `isPrivate` and
+// `localName` are parameters for the tests.
+export async function publicAddresses(hostname, { resolve = (h) => lookup(h, { all: true }), isPrivate = isPrivateAddress, localName = isLocalName } = {}) {
+  const host = String(hostname).replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase()
+  const literal = isIP(host)
+  if (!literal && localName(host)) throw new Error(`${host || 'an empty name'} is not a public host`)
+  const addrs = literal ? [{ address: host, family: literal }] : await resolve(host)
+  if (!addrs.length) throw new Error(`${host} did not resolve`)
+  for (const { address } of addrs) if (isPrivate(address)) throw new Error(`${host} resolves to ${address}, which is not public`)
+  return addrs
+}
+
+/** Resolves to the addresses that were checked; rejects if the host is not public. */
 export async function assertPublicHost(url) {
-  const host = new URL(url).hostname.replace(/^\[|\]$/g, '')
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) throw new Error(`${host} is not a public host`)
-  const addrs = isIP(host) ? [{ address: host }] : await lookup(host, { all: true })
-  for (const { address } of addrs) if (isPrivateAddress(address)) throw new Error(`${host} resolves to ${address}, which is not public`)
+  return publicAddresses(new URL(url).hostname)
+}
+
+// One request to a host that has just been checked, sent to the addresses
+// that were checked: the name is not looked up a second time, where it could
+// answer differently. No redirect is followed - the next host is the caller's
+// to check first.
+export function requestAt(url, addresses, { method = 'GET', headers = {}, signal, maxBytes = 64 * 1024 * 1024 } = {}) {
+  const u = new URL(url)
+  const pinned = addresses.map((a) => ({ address: a.address, family: a.family || isIP(a.address) }))
+  const lookupPinned = (host, options, done) => (options && options.all ? done(null, pinned) : done(null, pinned[0].address, pinned[0].family))
+  return new Promise((resolve, reject) => {
+    const req = (u.protocol === 'https:' ? httpsRequest : httpRequest)(u, { method, headers, signal, lookup: lookupPinned }, (res) => {
+      const chunks = []
+      let size = 0
+      res.on('data', (c) => { size += c.length; if (size > maxBytes) req.destroy(new Error('the answer is too large')); else chunks.push(c) })
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }))
+      res.on('error', reject)
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+// A GET that stays on the public internet: every hop is checked before it is
+// connected to, and connected to at the address that was checked.
+async function getPublic(url, limit, check) {
+  let current = url
+  for (let hop = 0; hop <= 5; hop++) {
+    if (!/^https?:$/.test(new URL(current).protocol)) throw new Error(`${current} is not an http(s) address`)
+    const r = await requestAt(current, await check(current), { headers: { 'user-agent': ua(null) }, signal: limit() })
+    const location = r.status >= 300 && r.status < 400 && r.headers.location
+    if (!location) { if (r.status < 200 || r.status > 299) throw new Error(`HTTP ${r.status}`); return r.text }
+    current = new URL(location, current).href
+  }
+  throw new Error('too many redirects')
 }
 
 // ── the egress filter ───────────────────────────────────────────────────────
@@ -363,22 +422,16 @@ export async function assertPublicHost(url) {
 //
 // What it refused is counted, not listed: a public report naming the internal
 // hosts a page probed for would tell whoever wrote the page which ones exist.
-// `resolve` and `isPrivate` are parameters for the tests.
-export async function startEgressFilter({ resolve = (host) => lookup(host, { all: true }), isPrivate = isPrivateAddress, onRefuse = null } = {}) {
+// `resolve`, `isPrivate` and `localName` are parameters for the tests.
+export async function startEgressFilter({ resolve, isPrivate, localName, onRefuse = null } = {}) {
   let refused = 0
   const open = new Set()
   const track = (s) => { open.add(s); s.on('close', () => open.delete(s)) }
+  // One lookup per request, and the request goes to the address it returned.
   const vet = async (raw) => {
-    const host = raw.replace(/^\[|\]$/g, '').toLowerCase()
-    try {
-      if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) throw new Error(`${host} is not a public host`)
-      const addrs = isIP(host) ? [{ address: host }] : await resolve(host)
-      if (!addrs.length) throw new Error(`${host} did not resolve`)
-      for (const { address } of addrs) if (isPrivate(address)) throw new Error(`${host} resolves to ${address}, which is not public`)
-      return addrs[0].address
-    } catch (e) {
+    try { return (await publicAddresses(raw, { resolve, isPrivate, localName }))[0].address } catch (e) {
       refused++
-      if (onRefuse) onRefuse(host, e.message)
+      if (onRefuse) onRefuse(raw.replace(/^\[|\]$/g, '').toLowerCase(), e.message)
       throw e
     }
   }
@@ -431,20 +484,27 @@ export async function startEgressFilter({ resolve = (host) => lookup(host, { all
 
 // `limit()` gives each request its own AbortSignal: the page timeout, and the
 // sweep's own signal, so a sitemap server that never answers cannot hold a
-// sweep that has not opened a page yet.
-async function readSitemap(url, limit, seen = new Set()) {
+// sweep that has not opened a page yet. Under --public-only (`publicOnly`) a
+// sitemap is a request like any other the scan makes for a stranger: the
+// sitemap, every child an index names and every redirect on the way are
+// checked first and fetched at the address that was checked. `check` is a
+// parameter for the tests.
+export async function readSitemap(url, { limit = () => AbortSignal.timeout(30000), publicOnly = false, check = assertPublicHost } = {}, seen = new Set()) {
   if (seen.has(url) || seen.size > 50) return []
   seen.add(url)
   let xml
   try {
-    const r = await fetch(url, { headers: { 'user-agent': ua(null) }, signal: limit() })
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    xml = await r.text()
+    if (publicOnly) xml = await getPublic(url, limit, check)
+    else {
+      const r = await fetch(url, { headers: { 'user-agent': ua(null) }, signal: limit() })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      xml = await r.text()
+    }
   } catch (e) { throw new Error(`sitemap ${url}: ${e.name === 'TimeoutError' ? 'no answer in time' : e.message}`) }
   const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1].trim())
   if (/<sitemapindex/i.test(xml)) {
     const out = []
-    for (const child of locs) out.push(...(await readSitemap(child, limit, seen)))
+    for (const child of locs) out.push(...(await readSitemap(child, { limit, publicOnly, check }, seen)))
     return out
   }
   return locs
@@ -684,7 +744,7 @@ export async function sweep(o, log = console.error) {
   const seeds = []
   for (const u of o.urls) { const n = normalizeUrl(u); if (!n) throw new UsageError(`not an http(s) URL: ${u}`); seeds.push(n) }
   const limit = () => (o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeout)]) : AbortSignal.timeout(o.timeout))
-  for (const s of o.sitemap) for (const u of await readSitemap(s, limit)) { const n = normalizeUrl(u); if (n) seeds.push(n) }
+  for (const s of o.sitemap) for (const u of await readSitemap(s, { limit, publicOnly: o.publicOnly })) { const n = normalizeUrl(u); if (n) seeds.push(n) }
   for (const f of o.urlFiles) for (const u of readUrlFile(f)) { const n = normalizeUrl(u); if (n) seeds.push(n) }
   if (!seeds.length) throw new UsageError('no pages: give URLs, --sitemap or --urls (try -help)')
   const queue = [...new Set(seeds)].map((url) => ({ url, depth: 0 }))

@@ -103,7 +103,9 @@ where. [`../COMMAND.md`](../COMMAND.md#signing-in) has the commands and the limi
 `--public-only` resolves every hostname, before the first request and again
 after any redirect, and refuses anything on a private, loopback, link-local,
 carrier-grade NAT, multicast or reserved address (IPv4 carried inside IPv6
-included), or named `localhost`, `*.localhost` or `*.local`. Off by default,
+included), or named `localhost`, `*.localhost` or `*.local`, or with no dot in
+its name at all: `db` and `intranet` are names on the network running the
+scan, whatever they resolve to. Off by default,
 because the commonest use of this tool is a dev server on `localhost`. On for
 anything that lets other people choose the target.
 
@@ -117,6 +119,10 @@ answer cannot change between the check and the connection. Nothing bypasses
 it, loopback included, and WebRTC is held to proxied traffic. The report counts
 what was refused without naming it, because a public report listing the
 internal names a page probed for would tell its author which ones exist.
+
+Sitemaps are held to the same rule. Under `--public-only` the sitemap, every
+child a sitemap index names and every redirect on the way is checked first,
+and fetched at the address that was checked.
 
 ## The browser and axe-core
 

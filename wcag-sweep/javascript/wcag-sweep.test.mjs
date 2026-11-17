@@ -15,6 +15,8 @@ import { createServer, request } from 'node:http'
 import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, startEgressFilter, Browser, findChrome, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
 import { parseHeader, SIGNED_IN_EXCLUDE, withHeaders, domainMatch, toCookieParams, seedStorageScript, writeSession, readSession, isSignInPage, sweep, captureSession } from './wcag-sweep.mjs'
 import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { publicAddresses, isLocalName, requestAt, readSitemap } from './wcag-sweep.mjs'
+import { createServer as createTcpServer } from 'node:net'
 import { tmpdir } from 'node:os'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -592,4 +594,188 @@ test('sweep: one browser serves every width and the reflow check, and --restart-
     assert.equal(alive, 0, 'and none left open')
     assert.ok(HELP.includes('--restart-every <n>'))
   } finally { Browser.prototype.start = start; Browser.prototype.close = close; site.close() }
+})
+
+// ── --public-only, by the ways it is usually got round (#51) ────────────────
+
+test('guard: a name with no dot is refused whatever it resolves to, and a trailing dot changes nothing', async () => {
+  const anywhere = { resolve: async () => [{ address: '8.8.8.8', family: 4 }] } // a resolver that calls everything public
+  for (const h of ['db', 'redis', 'web_proxy', 'intranet', 'localhost', 'localhost.', 'LOCALHOST', 'dev.localhost.', 'printer.local.', '2130706433', '0x7f000001', '017700000001', '']) {
+    await assert.rejects(publicAddresses(h, anywhere), /is not a public host/, h)
+  }
+  assert.deepEqual(await publicAddresses('example.com.', anywhere), [{ address: '8.8.8.8', family: 4 }])
+  assert.ok(isLocalName('db') && isLocalName('a.localhost') && isLocalName('nas.local') && !isLocalName('example.com'))
+  await assert.rejects(publicAddresses('gone.test', { resolve: async () => [] }), /did not resolve/)
+})
+
+test('guard: an IPv4 address written as a number, in octal, in hex or inside IPv6 is the address it means', async () => {
+  for (const u of ['http://2130706433/', 'http://0x7f000001/', 'http://0177.0.0.1/', 'http://0x7f.0.0.1/', 'http://127.1/', 'http://017700000001/', 'http://3232235777/', 'http://0xa9fea9fe/',
+    'http://[::1]/', 'http://[0:0:0:0:0:0:0:1]/', 'http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/', 'http://[0:0:0:0:0:ffff:7f00:1]/', 'http://[::ffff:169.254.169.254]/', 'http://[::ffff:a9fe:a9fe]/',
+    'http://[fe80::1]/', 'http://[fec0::1]/', 'http://[fd00:ec2::254]/', 'http://user:pass@127.0.0.1/', 'http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1./']) {
+    await assert.rejects(assertPublicHost(u), /not public/, u)
+  }
+  assert.equal(isPrivateAddress('fec0::1'), true); assert.equal(isPrivateAddress('feff::1'), true); assert.equal(isPrivateAddress('fe7f::1'), false)
+  assert.deepEqual(await assertPublicHost('http://8.8.8.8/'), [{ address: '8.8.8.8', family: 4 }], 'and it answers with the addresses it checked')
+})
+
+test('egress filter: every spelling of a private address is refused, as a request and as a CONNECT', async () => {
+  const t = target(); const port = await t.listen()
+  const f = await startEgressFilter() // the real resolver and the real rules
+  try {
+    for (const host of ['2130706433', '0x7f000001', '0177.0.0.1', '0x7f.0.0.1', '127.1', '[::1]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', '[0:0:0:0:0:0:0:1]', 'localhost.', 'LOCALHOST', 'db', 'web_proxy']) {
+      assert.equal((await tunnel(f.port, `${host}:${port}`)).status, 403, `CONNECT ${host}`)
+      assert.equal((await viaProxy(f.port, `http://${host}:${port}/x`, `${host}:${port}`)).status, 403, host)
+    }
+    assert.equal((await viaProxy(f.port, `http://user:pass@127.0.0.1:${port}/x`, 'x')).status, 403)
+    assert.deepEqual(t.hits, [], 'nothing reached the private target')
+  } finally { await f.close(); t.server.close() }
+})
+
+test('egress filter: a name whose answer changes is checked on every request, and each request goes where its own check pointed', async () => {
+  const pub = target('127.0.0.1'); const port = await pub.listen()
+  const trap = target('127.0.0.2'); await new Promise((r) => trap.server.listen(port, '127.0.0.2', r))
+  let lookups = 0
+  const f = await startEgressFilter({ resolve: async () => [{ address: ++lookups === 1 ? '127.0.0.1' : '127.0.0.2' }], isPrivate: (a) => a !== '127.0.0.1' })
+  try {
+    const first = await viaProxy(f.port, `http://flip.test:${port}/first`, `flip.test:${port}`)
+    assert.equal(first.status, 200)
+    assert.equal(lookups, 1, 'one lookup: the address that was checked is the address connected to')
+    assert.equal((await viaProxy(f.port, `http://flip.test:${port}/second`, `flip.test:${port}`)).status, 403)
+    assert.equal((await tunnel(f.port, `flip.test:${port}`)).status, 403)
+    assert.deepEqual(pub.hits.map((h) => h.path), ['/first'])
+    assert.deepEqual(trap.hits, [], 'the address it changed to was never connected to')
+  } finally { await f.close(); pub.server.close(); trap.server.close() }
+})
+
+test('egress filter: it speaks http and CONNECT; ftp, ws and file addresses get nowhere, and an upgrade is a request like any other', async () => {
+  const t = target(); const port = await t.listen()
+  const f = await startEgressFilter()
+  try {
+    for (const url of [`ftp://127.0.0.1:${port}/x`, `ws://127.0.0.1:${port}/x`, `wss://127.0.0.1:${port}/x`, 'file:///etc/passwd', `gopher://127.0.0.1:${port}/x`]) assert.equal((await viaProxy(f.port, url, 'x')).status, 400, url)
+    const upgrade = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: f.port, path: `http://127.0.0.1:${port}/socket`, headers: { host: `127.0.0.1:${port}`, connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13' } })
+      req.on('response', (res) => { res.resume(); resolve(res.statusCode) }); req.on('upgrade', (res) => resolve(res.statusCode)); req.on('error', reject); req.end()
+    })
+    assert.equal(upgrade, 403)
+    assert.deepEqual(t.hits, [])
+  } finally { await f.close(); t.server.close() }
+})
+
+// Everything a page can ask a browser for, aimed at a listener on a private
+// address (127.0.0.2). With every rule switched off each one arrives, which is
+// what makes the second run mean something; with the rules on, none does - no
+// request, and no connection either.
+test('a real browser: no request a page can make reaches a private address - names with no dot, numbers, IPv6, redirects, WebSockets, a name that changes', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const pub = target('127.0.0.3'); const P = await pub.listen()
+  const trap = { hits: [], conns: 0 }
+  const trapServer = createServer((req, res) => { trap.hits.push(req.url); res.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' }); res.end('<title>trap</title>reached') })
+  trapServer.on('connection', () => { trap.conns++ })
+  trapServer.on('upgrade', (req, socket) => { trap.hits.push(`ws ${req.url}`); socket.destroy() })
+  await new Promise((r) => trapServer.listen(P, '127.0.0.2', r))
+  const other = { conns: 0 } // anything that is not http: an ftp address
+  const otherServer = createTcpServer((s) => { other.conns++; s.destroy() })
+  const R = await listen(otherServer, '127.0.0.2')
+  const site = createServer((req, res) => {
+    const to = (location) => { res.writeHead(302, { Location: location }); res.end() }
+    if (req.url.startsWith('/to-address/')) return to(`http://127.0.0.2:${P}/redirected-${req.url.slice(12)}`)
+    if (req.url === '/to-name') return to(`http://sibling:${P}/redirected-to-a-name`)
+    if (req.url !== '/') { res.writeHead(404); return res.end() }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<!doctype html><html lang="en"><head><title>probe</title></head><body>
+<img src="http://sibling:${P}/img-no-dot" alt=""><img src="http://db_1:${P}/img-underscore" alt="">
+<iframe title="a" src="http://sibling:${P}/frame-no-dot"></iframe><iframe title="b" src="http://127.0.0.2:${P}/frame-loopback"></iframe>
+<img src="http://2130706434:${P}/img-decimal" alt=""><img src="http://0x7f.0.0.2:${P}/img-hex" alt=""><img src="http://0177.0.0.2:${P}/img-octal" alt=""><img src="http://127.2:${P}/img-short" alt="">
+<img src="http://[::ffff:127.0.0.2]:${P}/img-mapped" alt=""><img src="http://[::1]:${P}/img-v6" alt=""><img src="http://localhost.:${P}/img-localhost-dot" alt="">
+<img src="/to-address/img" alt=""><img src="/to-name" alt=""><iframe title="c" src="/to-address/frame"></iframe>
+<img src="ftp://127.0.0.2:${R}/ftp" alt=""><iframe title="d" src="ftp://127.0.0.2:${R}/ftp-frame"></iframe><iframe title="e" src="file:///etc/hosts"></iframe>
+<script>
+const all = []
+const ask = (url) => fetch(url, { mode: 'no-cors' })
+all.push(ask('http://127.0.0.2:${P}/fetch-loopback'), ask('http://sibling:${P}/fetch-no-dot'), ask('/to-address/fetch'), ask('file:///etc/hosts'))
+all.push(ask('http://flip.test:${P}/flip-1').then(() => ask('http://flip.test:${P}/flip-2')))
+for (const url of ['ws://127.0.0.2:${P}/socket-loopback', 'ws://sibling:${P}/socket-no-dot']) all.push(new Promise((done) => { const w = new WebSocket(url); w.onopen = w.onerror = w.onclose = done }))
+navigator.sendBeacon('http://127.0.0.2:${P}/beacon', 'x')
+const stream = new EventSource('http://127.0.0.2:${P}/event-source'); stream.onerror = () => stream.close()
+window.settled = Promise.allSettled(all).then(() => true)
+</script></body></html>`)
+  })
+  const sitePort = await listen(site)
+  let flips = 0
+  const resolve = async (h) => {
+    if (h === 'page.test') return [{ address: '127.0.0.1' }]
+    if (h === 'sibling' || h === 'db_1') return [{ address: '127.0.0.2' }]
+    if (h === 'flip.test') return [{ address: ++flips === 1 ? '127.0.0.3' : '127.0.0.2' }]
+    throw new Error('offline in this test')
+  }
+  const visit = async (rules) => {
+    trap.hits.length = 0; trap.conns = 0; other.conns = 0; pub.hits.length = 0; flips = 0
+    const f = await startEgressFilter({ resolve, ...rules })
+    const b = new Browser(chrome, 1280, f.chromeFlags(), { callTimeout: 20000 })
+    try {
+      await b.start()
+      await b.open(`http://page.test:${sitePort}/`, 15000)
+      await b.evaluate('window.settled')
+      await new Promise((r) => setTimeout(r, 1500)) // the beacon, the event stream and the frames
+      await b.open(`http://page.test:${sitePort}/to-address/page`, 15000).catch(() => {})
+      return { hits: [...trap.hits], conns: trap.conns, other: other.conns, pub: pub.hits.map((h) => h.path), refused: f.refused }
+    } finally { await b.close(); await f.close() }
+  }
+  try {
+    const open = await visit({ isPrivate: () => false, localName: () => false })
+    for (const reached of ['/img-no-dot', '/img-underscore', '/frame-no-dot', '/frame-loopback', '/img-decimal', '/img-hex', '/img-octal', '/img-short', '/img-mapped',
+      '/redirected-img', '/redirected-frame', '/redirected-fetch', '/redirected-page', '/redirected-to-a-name', '/fetch-loopback', '/fetch-no-dot', 'ws /socket-loopback', 'ws /socket-no-dot', '/flip-2', '/beacon', '/event-source']) {
+      assert.ok(open.hits.includes(reached), `with every rule off, ${reached} arrives: ${open.hits.join(' ')}`)
+    }
+    assert.equal(open.other, 0, 'an ftp address opens no connection even then: the browser no longer speaks it')
+
+    const guarded = await visit({ isPrivate: (a) => a !== '127.0.0.1' && a !== '127.0.0.3' })
+    assert.deepEqual(guarded.hits, [], 'no request reached the private address')
+    assert.equal(guarded.conns, 0, 'and no connection was opened to it')
+    assert.equal(guarded.other, 0)
+    assert.deepEqual(guarded.pub, ['/flip-1'], 'the name was reached while it was public, and not after it changed')
+    assert.ok(guarded.refused >= 20, `refused ${guarded.refused}`)
+  } finally { site.close(); trapServer.close(); otherServer.close(); pub.server.close() }
+})
+
+test('requestAt: the request goes to the address it was given, not to a lookup of the name', async () => {
+  const t = target(); const port = await t.listen()
+  try {
+    // nowhere.test is not in any DNS: an answer proves the name was never looked up.
+    const r = await requestAt(`http://nowhere.test:${port}/page?q=1`, [{ address: '127.0.0.1' }], { method: 'HEAD' })
+    assert.equal(r.status, 200)
+    assert.deepEqual(t.hits, [{ path: '/page?q=1', host: `nowhere.test:${port}` }])
+    assert.equal((await requestAt(`http://nowhere.test:${port}/again`, [{ address: '127.0.0.1', family: 4 }])).text, 'reached')
+  } finally { t.server.close() }
+})
+
+test('sitemaps under --public-only: a private sitemap, a private child of a public index and a redirect to a private address are refused before they are asked for', async () => {
+  const priv = target('127.0.0.2'); const privPort = await priv.listen()
+  const asked = []
+  const pubServer = createServer((req, res) => {
+    asked.push(req.url)
+    const xml = (body) => { res.writeHead(200, { 'Content-Type': 'application/xml' }); res.end(body) }
+    const here = `http://pub.test:${pubServer.address().port}`
+    if (req.url === '/pages.xml') return xml(`<urlset><url><loc>${here}/a</loc></url><url><loc>${here}/b</loc></url></urlset>`)
+    if (req.url === '/index.xml') return xml(`<sitemapindex><sitemap><loc>${here}/pages.xml</loc></sitemap><sitemap><loc>http://127.0.0.2:${privPort}/child.xml</loc></sitemap></sitemapindex>`)
+    if (req.url === '/hop.xml') { res.writeHead(301, { Location: '/pages.xml' }); return res.end() }
+    if (req.url === '/moved.xml') { res.writeHead(302, { Location: `http://127.0.0.2:${privPort}/landing.xml` }); return res.end() }
+    res.writeHead(404); res.end()
+  })
+  const pubPort = await listen(pubServer)
+  const here = `http://pub.test:${pubPort}`
+  // pub.test stands for a public host: it is "checked" to 127.0.0.1, and is in no DNS, so reaching it proves the fetch used the checked address.
+  const held = { publicOnly: true, check: async (u) => (new URL(u).hostname === 'pub.test' ? [{ address: '127.0.0.1', family: 4 }] : assertPublicHost(u)) }
+  try {
+    assert.deepEqual(await readSitemap(`${here}/pages.xml`, held), [`${here}/a`, `${here}/b`])
+    assert.deepEqual(await readSitemap(`${here}/hop.xml`, held), [`${here}/a`, `${here}/b`], 'a redirect that stays public is followed')
+    await assert.rejects(readSitemap(`${here}/index.xml`, held), /127\.0\.0\.2, which is not public/)
+    await assert.rejects(readSitemap(`${here}/moved.xml`, held), /127\.0\.0\.2, which is not public/)
+    await assert.rejects(readSitemap(`http://127.0.0.2:${privPort}/sitemap.xml`, { publicOnly: true }), /not public/)
+    await assert.rejects(readSitemap(`http://db:${privPort}/sitemap.xml`, { publicOnly: true }), /not a public host/)
+    if (chrome) await assert.rejects(sweep(parseArgs(['--sitemap', `http://127.0.0.2:${privPort}/sitemap.xml`, '--public-only', '--quiet', '--chrome', chrome]), () => {}), /not public/)
+    assert.deepEqual(priv.hits, [], 'the private address was never asked for anything')
+    // Without --public-only the same sitemap is fetched: a dev server is the tool's commonest target.
+    assert.deepEqual(await readSitemap(`http://127.0.0.2:${privPort}/sitemap.xml`), [])
+    assert.equal(priv.hits.length, 1)
+  } finally { pubServer.close(); priv.server.close() }
 })
