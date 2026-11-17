@@ -29,7 +29,7 @@ import { dirname, join, posix, resolve, win32 } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
-export const VERSION = '1.2.1'
+export const VERSION = '1.3.0'
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 // ── axe-core, vendored and pinned ───────────────────────────────────────────
