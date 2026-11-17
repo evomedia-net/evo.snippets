@@ -99,16 +99,18 @@ happens once, in a browser window you can use.
 
 | Option | What it does |
 | --- | --- |
-| `--width <list>` | Viewport widths, comma separated. Each page is audited once per width. Default `1280`. `375` is a phone; `320` is the floor WCAG 1.4.10 names. |
+| `--width <list>` | Viewport widths, comma separated. Each page is audited once per width, in one browser that is resized before each page. Default `1280`. `375` is a phone; `320` is the floor WCAG 1.4.10 names. |
 | `--html <attr=value>` | Set an attribute on `<html>` before the rules run. For sites with an accessibility mode keyed on such an attribute. |
 | `--timeout <ms>` | How long a page may take to load, and how long any one step on it may go unanswered. Past it the page is recorded as failed and the sweep moves on; a browser that crashed or stopped answering is replaced first. Default 30000. |
 | `--delay <ms>` | Pause between page loads, out of politeness to the target. Default 500. |
+| `--restart-every <n>` | Start a new browser every n pages, so a long crawl gives back the memory a browser has gathered. Default 0, never. A signed-in sweep goes back to the session it started with at each restart. |
 | `--user-agent <s>` | Override the User-Agent. The default names this tool and links to this repository. |
 
 ```
 ./run.sh https://example.com --crawl --width 1280,375
 ./run.sh https://example.com --html data-a11y=on
 ./run.sh https://example.com --crawl --timeout 60000 --delay 1000
+./run.sh https://example.com --crawl --max-pages 0 --restart-every 50
 ```
 
 ## What is checked

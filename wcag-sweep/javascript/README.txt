@@ -121,8 +121,11 @@ The browser and axe-core
 ------------------------
 
 It finds Chrome, Edge or Chromium on Windows, macOS and Linux; --chrome <path>
-or the WCAG_SWEEP_CHROME variable overrides. Each width gets its own headless
-instance with a throwaway profile, deleted when the run ends.
+or the WCAG_SWEEP_CHROME variable overrides. One headless instance serves the
+whole sweep, with a throwaway profile that is deleted when the run ends: its
+viewport is set to each width before a page is opened at it, so three widths
+do not mean three browsers. --restart-every <n> starts a new one every n
+pages, which gives a long crawl back the memory a browser has gathered.
 
 A browser can stop answering: its tab crashes or is killed for memory, a
 page's script never yields, the process dies. That is one page's failure and

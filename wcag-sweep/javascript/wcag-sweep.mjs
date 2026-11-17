@@ -83,6 +83,7 @@ Signing in (a site's pages behind its login)
 How each page is rendered
   --width <list>       Viewport widths, comma separated (default 1280). Each page
                        is audited once per width; 375 is a phone, 320 the WCAG floor.
+                       One browser serves them all, resized before each page.
   --html <attr=value>  Set an attribute on <html> before the rules run, e.g.
                        --html data-a11y=on to audit a site's accessibility mode.
   --timeout <ms>       How long a page may take to load, and how long any one step
@@ -90,6 +91,10 @@ How each page is rendered
                        is recorded as failed and the sweep moves on; a browser
                        that crashed or stopped answering is replaced first.
   --delay <ms>         Pause between page loads, politeness for the target (default 500).
+  --restart-every <n>  Start a new browser every n pages, so a long crawl gives
+                       back the memory a browser has gathered (default 0, never).
+                       A signed-in sweep goes back to the session it started
+                       with at each restart.
   --user-agent <s>     Override the User-Agent (default names this tool and its repo).
 
 What is checked
@@ -122,8 +127,8 @@ The browser
 Exit codes: 0 clean, 1 violations found (see --fail-on), 2 usage or environment error.`
 
 export function parseArgs(argv) {
-  const o = { urls: [], sitemap: [], urlFiles: [], crawl: false, maxPages: 25, depth: 2, list: false, widths: [1280], html: null, timeout: 30000, delay: 500, userAgent: null, tags: DEFAULT_TAGS, reflow: false, publicOnly: false, json: null, report: null, quiet: false, failOn: 'any', chrome: null, axe: null, login: null, session: null, headers: [], exclude: [], help: false, version: false }
-  const takes = new Set(['--sitemap', '--urls', '--max-pages', '--depth', '--width', '--html', '--timeout', '--delay', '--user-agent', '--tags', '--json', '--report', '--fail-on', '--chrome', '--axe', '--login', '--session', '--header', '--exclude'])
+  const o = { urls: [], sitemap: [], urlFiles: [], crawl: false, maxPages: 25, depth: 2, list: false, widths: [1280], html: null, timeout: 30000, delay: 500, restartEvery: 0, userAgent: null, tags: DEFAULT_TAGS, reflow: false, publicOnly: false, json: null, report: null, quiet: false, failOn: 'any', chrome: null, axe: null, login: null, session: null, headers: [], exclude: [], help: false, version: false }
+  const takes = new Set(['--sitemap', '--urls', '--max-pages', '--depth', '--width', '--html', '--timeout', '--delay', '--restart-every', '--user-agent', '--tags', '--json', '--report', '--fail-on', '--chrome', '--axe', '--login', '--session', '--header', '--exclude'])
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (['-help', '--help', '-h', '--h', '-?'].includes(a)) { o.help = true; continue }
@@ -140,6 +145,7 @@ export function parseArgs(argv) {
         case '--html': { const eq = v.indexOf('='); if (eq < 1) throw new UsageError(`--html wants attr=value, got ${v}`); o.html = [v.slice(0, eq), v.slice(eq + 1)]; break }
         case '--timeout': o.timeout = positiveInt(a, v); break
         case '--delay': o.delay = positiveInt(a, v, true); break
+        case '--restart-every': o.restartEvery = positiveInt(a, v, true); break
         case '--user-agent': o.userAgent = v; break
         case '--tags': o.tags = v.split(',').map((t) => t.trim()).filter(Boolean); break
         case '--json': o.json = v; break
@@ -539,6 +545,13 @@ export class Browser {
     this.fail(err)
     try { this.proc.kill('SIGKILL') } catch {}
   }
+  // One browser serves every width: the viewport is set before a page is
+  // opened in it, so each page is laid out from scratch at that width.
+  async resize(width) {
+    if (width === this.width) return
+    await this.send('Emulation.setDeviceMetricsOverride', { width, height: 900, deviceScaleFactor: 1, mobile: width < 768 }, this.session)
+    this.width = width
+  }
   on(method, fn) { if (!this.listeners.has(method)) this.listeners.set(method, []); this.listeners.get(method).push(fn) }
   // Before the first page: the signed-in session, and any --header. The
   // headers go only to the swept origins: requests to them are paused and
@@ -648,7 +661,7 @@ const REFLOW = `(() => {
 // ('done'), and `o.onQueue(audited, queued)` after each page, so a host that
 // shows a report while it is being made has something to show. `o.signal` is
 // an AbortSignal: once aborted the sweep ends at once, in the middle of a page
-// if need be. Its browsers are killed, the page it was on is left out, and the
+// if need be. Its browser is killed, the page it was on is left out, and the
 // report of the pages before it comes back with `aborted: true`.
 //
 // A page that cannot be audited is that page's failure and no one else's: a
@@ -704,28 +717,30 @@ export async function sweep(o, log = console.error) {
   const egress = o.publicOnly ? await startEgressFilter({ onRefuse: o.quiet ? null : (host, why) => log(`refused a request: ${why}`) }) : null
   const flags = egress ? egress.chromeFlags() : []
   const aborted = () => Boolean(o.signal && o.signal.aborted)
-  const browsers = new Map()
-  let everStarted = false
+  // One browser for the whole sweep, set to each width before a page is opened
+  // at it. A browser per width held three open for a sweep at two widths with
+  // --reflow, a dozen processes each, for as long as the crawl ran.
+  let browser = null, pagesOnIt = 0, everStarted = false
+  const retire = async () => { const old = browser; browser = null; if (old) await old.close() }
   // A browser that died - its tab crashed, it stopped answering - is replaced
   // here, before the next page that needs it.
-  const browserFor = async (w) => {
+  const browserAt = async (width) => {
     if (aborted()) throw new Error('the sweep was aborted')
-    const old = browsers.get(w)
-    if (old && old.dead) { browsers.delete(w); await old.close() }
-    if (!browsers.has(w)) {
-      const b = new Browser(chrome, w, flags, { callTimeout: o.timeout })
-      browsers.set(w, b)
-      try { await b.start(); await b.setUserAgent(ua(o.userAgent)); if (prepared) await b.prepare(prepared); everStarted = true } catch (e) { browsers.delete(w); await b.close(); throw e }
+    if (browser && browser.dead) await retire()
+    if (!browser) {
+      const b = new Browser(chrome, width, flags, { callTimeout: o.timeout })
+      browser = b; pagesOnIt = 0
+      try { await b.start(); await b.setUserAgent(ua(o.userAgent)); if (prepared) await b.prepare(prepared); everStarted = true } catch (e) { if (browser === b) browser = null; await b.close(); throw e }
     }
-    return browsers.get(w)
+    await browser.resize(width)
+    return browser
   }
-  // An abort ends the sweep now, not at the next page: killing the browsers
+  // An abort ends the sweep now, not at the next page: killing the browser
   // rejects whatever call the sweep is waiting on.
-  const onAbort = () => { for (const b of browsers.values()) b.kill(new Error('the sweep was aborted')) }
+  const onAbort = () => { if (browser) browser.kill(new Error('the sweep was aborted')) }
   if (o.signal) o.signal.addEventListener('abort', onAbort, { once: true })
 
   try {
-    if (o.reflow && !o.widths.includes(320)) await browserFor(320)
     let audited = 0
     while (queue.length && (o.maxPages === 0 || audited < o.maxPages)) {
       const { url, depth } = queue.shift()
@@ -733,13 +748,16 @@ export async function sweep(o, log = console.error) {
       if (o.publicOnly) { try { await assertPublicHost(url) } catch (e) { report.skipped.push({ url, why: e.message }); continue } }
       if (aborted()) break
       audited++
+      // --restart-every: a new browser between pages, never between the widths
+      // of one, so what the old one had gathered goes back to the machine.
+      if (browser && o.restartEvery && pagesOnIt >= o.restartEvery) await retire()
       const page = { url, title: '', results: [] }
       if (o.onPage) o.onPage(page, 'start')
       let discovered = null
       for (const width of o.widths) {
         if (aborted()) break
         try {
-          const b = await browserFor(width)
+          const b = await browserAt(width)
           const opened = await b.open(url, o.timeout)
           if (!/html/i.test(opened.type)) { report.skipped.push({ url, why: `content type ${opened.type}` }); page.results = []; break }
           if (!sameOrigin(opened.url, url)) { report.skipped.push({ url, why: `redirected off-site to ${opened.url}` }); page.results = []; break }
@@ -773,13 +791,14 @@ export async function sweep(o, log = console.error) {
       }
       if (o.reflow && page.results.length && !aborted()) {
         try {
-          const b = await browserFor(320)
+          const b = await browserAt(320)
           const opened = await b.open(url, o.timeout)
           if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
           if (/html/i.test(opened.type)) { page.reflow = await b.evaluate(REFLOW); if (!o.quiet && (page.reflow.overflow || page.reflow.clipped.length)) log(`${url} @320 reflow: overflow ${page.reflow.overflow}px, ${page.reflow.clipped.length} clipped`) }
         } catch (e) { page.reflow = { error: e.message } }
       }
       if (aborted()) break // the page it was on is not reported half done
+      pagesOnIt++
       if (o.list && o.crawl) console.log(url)
       if (page.results.length || o.list) report.pages.push(page)
       if (o.onPage) o.onPage(page, 'done')
@@ -800,7 +819,7 @@ export async function sweep(o, log = console.error) {
     else if (queue.length && o.maxPages) report.capped = { atPages: o.maxPages, left: queue.length }
   } finally {
     if (o.signal) o.signal.removeEventListener('abort', onAbort)
-    await Promise.all([...browsers.values()].map((b) => b.close()))
+    await retire()
     if (egress) { report.refused = egress.refused; await egress.close() }
   }
   if (o.list) return { report, exit: 0 }

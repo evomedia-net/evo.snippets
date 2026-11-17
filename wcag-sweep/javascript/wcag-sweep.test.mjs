@@ -555,3 +555,41 @@ test('sweep: an abort ends it in the middle of a page, with the pages before it'
     await assert.rejects(sweep({ ...o, signal: ac.signal }, () => {}), /aborted before any page was audited/)
   } finally { site.closeAllConnections(); site.close() }
 })
+
+// ── one browser for every width (#50) ───────────────────────────────────────
+// Every page here is clean at 1280px, shows an image with no alt text below
+// 500px, and has a box 350px wide: so each width has its own answer, and a
+// browser that was not really resized gives the wrong one.
+test('sweep: one browser serves every width and the reflow check, and --restart-every replaces it between pages', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  let alive = 0, most = 0
+  const start = Browser.prototype.start, close = Browser.prototype.close
+  Browser.prototype.start = async function () { started.push(this); most = Math.max(most, ++alive); return start.call(this) }
+  Browser.prototype.close = async function () { if (!this.counted) { this.counted = true; alive-- } return close.call(this) }
+  const paths = ['/', '/p2', '/p3', '/p4', '/p5']
+  const site = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<!doctype html><html lang="en"><head><title>Page ${req.url}</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>.narrow{display:none}@media (max-width:500px){.narrow{display:block}}.rigid{width:350px}</style></head>
+<body><main><h1>Page ${req.url}</h1><ul>${paths.map((p) => `<li><a href="${p}">Page ${p}</a></li>`).join('')}</ul>
+<img class="narrow" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><div class="rigid">A box 350px wide.</div></main></body></html>`)
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--width', '1280,375', '--reflow', '--restart-every', '2', '--delay', '0', '--timeout', '15000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    assert.equal(o.restartEvery, 2); assert.equal(parseArgs([`${base}/`]).restartEvery, 0)
+    const { report } = await sweep(o, () => {})
+    assert.deepEqual(report.pages.map((p) => new URL(p.url).pathname), paths)
+    for (const p of report.pages) {
+      const [wide, phone] = p.results
+      assert.equal(wide.width, 1280); assert.equal(phone.width, 375)
+      assert.ok(!wide.violations.some((v) => v.id === 'image-alt'), `${p.url}: the image is hidden at 1280px`)
+      assert.ok(phone.violations.some((v) => v.id === 'image-alt'), `${p.url}: and shown, with no alt text, at 375px`)
+      assert.ok(p.reflow.overflow > 0, `${p.url}: 350px does not fit in 320px`)
+    }
+    assert.equal(most, 1, 'never more than one browser open at a time')
+    assert.equal(started.length, 3, 'a new browser after every second page')
+    assert.equal(alive, 0, 'and none left open')
+    assert.ok(HELP.includes('--restart-every <n>'))
+  } finally { Browser.prototype.start = start; Browser.prototype.close = close; site.close() }
+})
