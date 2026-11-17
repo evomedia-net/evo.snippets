@@ -85,7 +85,10 @@ How each page is rendered
                        is audited once per width; 375 is a phone, 320 the WCAG floor.
   --html <attr=value>  Set an attribute on <html> before the rules run, e.g.
                        --html data-a11y=on to audit a site's accessibility mode.
-  --timeout <ms>       Per-page load timeout (default 30000).
+  --timeout <ms>       How long a page may take to load, and how long any one step
+                       on it may go unanswered (default 30000). Past it that page
+                       is recorded as failed and the sweep moves on; a browser
+                       that crashed or stopped answering is replaced first.
   --delay <ms>         Pause between page loads, politeness for the target (default 500).
   --user-agent <s>     Override the User-Agent (default names this tool and its repo).
 
@@ -420,16 +423,22 @@ export async function startEgressFilter({ resolve = (host) => lookup(host, { all
   }
 }
 
-async function readSitemap(url, seen = new Set()) {
+// `limit()` gives each request its own AbortSignal: the page timeout, and the
+// sweep's own signal, so a sitemap server that never answers cannot hold a
+// sweep that has not opened a page yet.
+async function readSitemap(url, limit, seen = new Set()) {
   if (seen.has(url) || seen.size > 50) return []
   seen.add(url)
-  const r = await fetch(url, { headers: { 'user-agent': ua(null) } })
-  if (!r.ok) throw new Error(`sitemap ${url}: HTTP ${r.status}`)
-  const xml = await r.text()
+  let xml
+  try {
+    const r = await fetch(url, { headers: { 'user-agent': ua(null) }, signal: limit() })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    xml = await r.text()
+  } catch (e) { throw new Error(`sitemap ${url}: ${e.name === 'TimeoutError' ? 'no answer in time' : e.message}`) }
   const locs = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1].trim())
   if (/<sitemapindex/i.test(xml)) {
     const out = []
-    for (const child of locs) out.push(...(await readSitemap(child, seen)))
+    for (const child of locs) out.push(...(await readSitemap(child, limit, seen)))
     return out
   }
   return locs
@@ -466,8 +475,15 @@ export function findChrome(explicit) {
   throw new UsageError('no Chrome, Edge or Chromium found; pass --chrome <path> or set WCAG_SWEEP_CHROME')
 }
 
+// A browser can stop answering: its tab crashes or is killed for memory, a
+// page's script never yields, the process dies. None of those sends a reply to
+// the call that was waiting, so nothing here waits without a limit. Every call
+// has `callTimeout` ms to be answered; a crashed tab, a closed connection or
+// an exited process rejects every call still waiting at once. Either way the
+// browser is `dead` from then on: whatever stopped it answering is still
+// there for the next call, so the sweep replaces it before its next page.
 export class Browser {
-  constructor(exe, width, flags = [], { headless = true } = {}) { this.exe = exe; this.width = width; this.flags = flags; this.headless = headless; this.id = 0; this.pending = new Map(); this.listeners = new Map() }
+  constructor(exe, width, flags = [], { headless = true, callTimeout = 30000 } = {}) { this.exe = exe; this.width = width; this.flags = flags; this.headless = headless; this.callTimeout = callTimeout; this.dead = null; this.id = 0; this.pending = new Map(); this.listeners = new Map() }
   async start() {
     this.profile = mkdtempSync(join(tmpdir(), 'wcag-sweep-'))
     this.port = 9222 + Math.floor(Math.random() * 20000)
@@ -478,21 +494,50 @@ export class Browser {
     // Headed only to let a person sign in (--login): a window they can use.
     const mode = this.headless ? ['--headless=new', '--hide-scrollbars'] : []
     this.proc = spawn(this.exe, [...mode, `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--mute-audio', `--window-size=${this.width},900`, ...this.flags, ...extra, 'about:blank'], { stdio: 'ignore' })
+    this.proc.on('exit', () => this.fail(new Error('the browser exited')))
+    this.proc.on('error', (e) => this.fail(new Error(`the browser could not be started: ${e.message}`)))
     let wsUrl
-    for (let i = 0; i < 150 && !wsUrl; i++) { try { const r = await fetch(`http://127.0.0.1:${this.port}/json/version`); if (r.ok) wsUrl = (await r.json()).webSocketDebuggerUrl } catch {} if (!wsUrl) await sleep(200) }
+    for (let i = 0; i < 150 && !wsUrl; i++) {
+      if (this.dead) throw this.dead
+      try { const r = await fetch(`http://127.0.0.1:${this.port}/json/version`, { signal: AbortSignal.timeout(2000) }); if (r.ok) wsUrl = (await r.json()).webSocketDebuggerUrl } catch {}
+      if (!wsUrl) await sleep(200)
+    }
     if (!wsUrl) throw new Error('the browser did not come up')
     this.ws = new WebSocket(wsUrl)
-    await new Promise((res, rej) => { this.ws.onopen = res; this.ws.onerror = rej })
-    this.ws.onmessage = (m) => {
-      const d = JSON.parse(m.data)
-      if (d.id && this.pending.has(d.id)) { const p = this.pending.get(d.id); this.pending.delete(d.id); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result) }
-      else if (d.method && this.listeners.has(d.method)) for (const fn of this.listeners.get(d.method)) fn(d.params, d.sessionId)
-    }
+    await new Promise((res, rej) => { this.ws.onopen = res; this.ws.onerror = () => rej(new Error('the browser did not accept a connection')) })
+    this.wire()
     const { targetId } = await this.send('Target.createTarget', { url: 'about:blank' })
     this.session = (await this.send('Target.attachToTarget', { targetId, flatten: true })).sessionId
     await this.send('Page.enable', {}, this.session)
     await this.send('Runtime.enable', {}, this.session)
     if (this.headless) await this.send('Emulation.setDeviceMetricsOverride', { width: this.width, height: 900, deviceScaleFactor: 1, mobile: this.width < 768 }, this.session)
+  }
+  // What the connection brings: an answer to a call, the tab's death, or an
+  // event someone listens for. Apart from start() so the tests can drive it.
+  wire() {
+    this.ws.onmessage = (m) => {
+      const d = JSON.parse(m.data)
+      if (d.id && this.pending.has(d.id)) { const p = this.pending.get(d.id); this.pending.delete(d.id); clearTimeout(p.timer); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result) }
+      else if (d.method === 'Inspector.targetCrashed' || (d.method === 'Target.detachedFromTarget' && d.params && d.params.sessionId === this.session)) this.fail(new Error('the browser tab crashed'))
+      else if (d.method && this.listeners.has(d.method)) for (const fn of this.listeners.get(d.method)) fn(d.params, d.sessionId)
+    }
+    this.ws.onclose = () => this.fail(new Error('the browser closed its connection'))
+    this.ws.onerror = () => this.fail(new Error('the connection to the browser failed'))
+  }
+  // The end of this browser, for whatever reason: every call still waiting is
+  // rejected with it now, and every later call at once.
+  fail(err) {
+    if (this.dead) return
+    this.dead = err
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(err) }
+    this.pending.clear()
+  }
+  // Fail and end the process without waiting on anything, so it can be called
+  // from an abort. SIGKILL: a browser that has stopped answering may not
+  // answer a polite signal either, and its profile is thrown away regardless.
+  kill(err = new Error('the browser was closed')) {
+    this.fail(err)
+    try { this.proc.kill('SIGKILL') } catch {}
   }
   on(method, fn) { if (!this.listeners.has(method)) this.listeners.set(method, []); this.listeners.get(method).push(fn) }
   // Before the first page: the signed-in session, and any --header. The
@@ -514,22 +559,43 @@ export class Browser {
       await this.send('Fetch.enable', { patterns: [...origins].map((origin) => ({ urlPattern: `${origin}/*`, requestStage: 'Request' })) }, this.session)
     }
   }
-  send(method, params = {}, sessionId) { const id = ++this.id; return new Promise((resolve, reject) => { this.pending.set(id, { resolve, reject }); this.ws.send(JSON.stringify({ id, method, params, sessionId })) }) }
+  // `timeout` is how long this call may wait; `of` is the limit the caller
+  // was given, when this call has only what is left of it.
+  send(method, params = {}, sessionId, timeout = this.callTimeout, of = timeout) {
+    if (this.dead) return Promise.reject(this.dead)
+    const id = ++this.id
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => this.fail(new Error(`timed out after ${of} ms: ${method === 'Page.navigate' ? 'the page did not start to load' : 'the page stopped answering'}`)), timeout)
+      this.pending.set(id, { resolve, reject, timer })
+      try { this.ws.send(JSON.stringify({ id, method, params, sessionId })) } catch { this.fail(new Error('the browser closed its connection')) }
+    })
+  }
   async setUserAgent(s) { await this.send('Network.setUserAgentOverride', { userAgent: s }, this.session) }
-  async evaluate(expression) {
-    const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.session)
+  async evaluate(expression, timeout, of) {
+    const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.session, timeout, of)
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text)
     return r.result.value
   }
+  // `timeout` covers the whole load: the navigation and every look at whether
+  // the page has finished share it, so a call that never comes back is inside
+  // the limit and not beside it.
   async open(url, timeout) {
-    await this.send('Page.navigate', { url }, this.session)
     const t0 = Date.now()
-    while (Date.now() - t0 < timeout) { if ((await this.evaluate('document.readyState')) === 'complete') break; await sleep(100) }
-    if ((await this.evaluate('document.readyState')) !== 'complete') throw new Error(`timed out after ${timeout} ms`)
+    const left = () => Math.max(1, timeout - (Date.now() - t0))
+    await this.send('Page.navigate', { url }, this.session, left(), timeout)
+    let complete = false
+    while (!complete && Date.now() - t0 < timeout) { complete = (await this.evaluate('document.readyState', left(), timeout)) === 'complete'; if (!complete) await sleep(100) }
+    if (!complete) throw new Error(`timed out after ${timeout} ms`)
     await sleep(500) // fonts and late scripts
     return { url: await this.evaluate('location.href'), type: await this.evaluate('document.contentType'), title: await this.evaluate('document.title') }
   }
-  async close() { try { this.ws.close() } catch {} try { this.proc.kill() } catch {} try { rmSync(this.profile, { recursive: true, force: true }) } catch {} }
+  async close() {
+    this.kill()
+    try { this.ws.close() } catch {}
+    // The profile cannot be removed while the browser still holds files in it.
+    if (this.proc && this.proc.exitCode === null && this.proc.signalCode === null) await Promise.race([new Promise((r) => this.proc.once('exit', r)), sleep(3000)])
+    try { rmSync(this.profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) } catch {}
+  }
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -581,7 +647,14 @@ const REFLOW = `(() => {
 // `o.onPage(page, state)` is called as each page starts ('start') and ends
 // ('done'), and `o.onQueue(audited, queued)` after each page, so a host that
 // shows a report while it is being made has something to show. `o.signal` is
-// an AbortSignal: once aborted, no further page is started.
+// an AbortSignal: once aborted the sweep ends at once, in the middle of a page
+// if need be. Its browsers are killed, the page it was on is left out, and the
+// report of the pages before it comes back with `aborted: true`.
+//
+// A page that cannot be audited is that page's failure and no one else's: a
+// load that times out, a tab that crashes, a browser that stops answering is
+// an `error` in `page.results` for that width, and the next page gets a
+// browser that works.
 export async function sweep(o, log = console.error) {
   const chrome = findChrome(o.chrome)
   let axeSource, axeNote
@@ -597,7 +670,8 @@ export async function sweep(o, log = console.error) {
   // Seed pages.
   const seeds = []
   for (const u of o.urls) { const n = normalizeUrl(u); if (!n) throw new UsageError(`not an http(s) URL: ${u}`); seeds.push(n) }
-  for (const s of o.sitemap) for (const u of await readSitemap(s)) { const n = normalizeUrl(u); if (n) seeds.push(n) }
+  const limit = () => (o.signal ? AbortSignal.any([o.signal, AbortSignal.timeout(o.timeout)]) : AbortSignal.timeout(o.timeout))
+  for (const s of o.sitemap) for (const u of await readSitemap(s, limit)) { const n = normalizeUrl(u); if (n) seeds.push(n) }
   for (const f of o.urlFiles) for (const u of readUrlFile(f)) { const n = normalizeUrl(u); if (n) seeds.push(n) }
   if (!seeds.length) throw new UsageError('no pages: give URLs, --sitemap or --urls (try -help)')
   const queue = [...new Set(seeds)].map((url) => ({ url, depth: 0 }))
@@ -629,58 +703,89 @@ export async function sweep(o, log = console.error) {
   // Under --public-only the browser reaches the network only through the filter.
   const egress = o.publicOnly ? await startEgressFilter({ onRefuse: o.quiet ? null : (host, why) => log(`refused a request: ${why}`) }) : null
   const flags = egress ? egress.chromeFlags() : []
+  const aborted = () => Boolean(o.signal && o.signal.aborted)
   const browsers = new Map()
-  const browserFor = async (w) => { if (!browsers.has(w)) { const b = new Browser(chrome, w, flags); await b.start(); await b.setUserAgent(ua(o.userAgent)); if (prepared) await b.prepare(prepared); browsers.set(w, b) } return browsers.get(w) }
-  if (o.reflow && !o.widths.includes(320)) await browserFor(320)
+  let everStarted = false
+  // A browser that died - its tab crashed, it stopped answering - is replaced
+  // here, before the next page that needs it.
+  const browserFor = async (w) => {
+    if (aborted()) throw new Error('the sweep was aborted')
+    const old = browsers.get(w)
+    if (old && old.dead) { browsers.delete(w); await old.close() }
+    if (!browsers.has(w)) {
+      const b = new Browser(chrome, w, flags, { callTimeout: o.timeout })
+      browsers.set(w, b)
+      try { await b.start(); await b.setUserAgent(ua(o.userAgent)); if (prepared) await b.prepare(prepared); everStarted = true } catch (e) { browsers.delete(w); await b.close(); throw e }
+    }
+    return browsers.get(w)
+  }
+  // An abort ends the sweep now, not at the next page: killing the browsers
+  // rejects whatever call the sweep is waiting on.
+  const onAbort = () => { for (const b of browsers.values()) b.kill(new Error('the sweep was aborted')) }
+  if (o.signal) o.signal.addEventListener('abort', onAbort, { once: true })
 
   try {
+    if (o.reflow && !o.widths.includes(320)) await browserFor(320)
     let audited = 0
     while (queue.length && (o.maxPages === 0 || audited < o.maxPages)) {
       const { url, depth } = queue.shift()
       if (!looksLikePage(url)) { report.skipped.push({ url, why: 'not a page by its extension' }); continue }
       if (o.publicOnly) { try { await assertPublicHost(url) } catch (e) { report.skipped.push({ url, why: e.message }); continue } }
-      if (o.signal && o.signal.aborted) { report.aborted = true; break }
+      if (aborted()) break
       audited++
       const page = { url, title: '', results: [] }
       if (o.onPage) o.onPage(page, 'start')
-      let discovered = []
-      for (const [wi, width] of o.widths.entries()) {
-        const b = await browserFor(width)
-        let opened
-        try { opened = await b.open(url, o.timeout) } catch (e) { page.results.push({ width, error: e.message }); continue }
-        if (!/html/i.test(opened.type)) { report.skipped.push({ url, why: `content type ${opened.type}` }); page.results = []; break }
-        if (!sameOrigin(opened.url, url)) { report.skipped.push({ url, why: `redirected off-site to ${opened.url}` }); page.results = []; break }
-        if (o.publicOnly && opened.url !== url) { try { await assertPublicHost(opened.url) } catch (e) { report.skipped.push({ url, why: e.message }); page.results = []; break } }
-        page.title = opened.title
-        // The site sent a signed-in sweep to its sign-in page: the session has
-        // ended (expired, or signed out elsewhere). Said once, loudly, and in
-        // the report - every page after this is a signed-out page.
-        if (session && session.login && !report.sessionLost && isSignInPage(opened.url, session.login) && !isSignInPage(url, session.login)) {
-          report.sessionLost = { at: url }
-          log(`warning: ${url} opened the sign-in page - the session has ended, and pages from here on are swept signed out`)
-        }
-        if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
-        if (o.list) { if (wi === 0) discovered = await b.evaluate(LINKS); continue }
-        await b.evaluate(axeSource + '; true')
-        const axe = await b.evaluate(AXE_RUN(o.tags))
-        page.results.push({ width, violations: axe.violations, incomplete: axe.incomplete })
-        if (wi === 0 && o.crawl) discovered = await b.evaluate(LINKS)
-        if (!o.quiet) log(`${url} @${width}: ${axe.violations.length} rule${axe.violations.length === 1 ? '' : 's'} / ${axe.violations.reduce((n, v) => n + v.nodes.length, 0)} nodes failing`)
-      }
-      if (o.reflow && page.results.length) {
-        const b = await browserFor(320)
+      let discovered = null
+      for (const width of o.widths) {
+        if (aborted()) break
         try {
+          const b = await browserFor(width)
+          const opened = await b.open(url, o.timeout)
+          if (!/html/i.test(opened.type)) { report.skipped.push({ url, why: `content type ${opened.type}` }); page.results = []; break }
+          if (!sameOrigin(opened.url, url)) { report.skipped.push({ url, why: `redirected off-site to ${opened.url}` }); page.results = []; break }
+          if (o.publicOnly && opened.url !== url) { try { await assertPublicHost(opened.url) } catch (e) { report.skipped.push({ url, why: e.message }); page.results = []; break } }
+          page.title = opened.title
+          // The site sent a signed-in sweep to its sign-in page: the session has
+          // ended (expired, or signed out elsewhere). Said once, loudly, and in
+          // the report - every page after this is a signed-out page.
+          if (session && session.login && !report.sessionLost && isSignInPage(opened.url, session.login) && !isSignInPage(url, session.login)) {
+            report.sessionLost = { at: url }
+            log(`warning: ${url} opened the sign-in page - the session has ended, and pages from here on are swept signed out`)
+          }
+          if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
+          if (o.list) { if (!discovered) discovered = await b.evaluate(LINKS); continue }
+          await b.evaluate(axeSource + '; true')
+          const axe = await b.evaluate(AXE_RUN(o.tags))
+          // The links come from the first width that gets this far, so a page
+          // that fails at one width still leads the crawl on.
+          if (o.crawl && !discovered) discovered = await b.evaluate(LINKS)
+          page.results.push({ width, violations: axe.violations, incomplete: axe.incomplete })
+          if (!o.quiet) log(`${url} @${width}: ${axe.violations.length} rule${axe.violations.length === 1 ? '' : 's'} / ${axe.violations.reduce((n, v) => n + v.nodes.length, 0)} nodes failing`)
+        } catch (e) {
+          // This page at this width and nothing more: a load that timed out, a
+          // tab that crashed, a browser that stopped answering. It is recorded
+          // and the sweep moves on. A browser that has never once started is
+          // not a page's fault, and there is nothing to move on with.
+          if (aborted()) break
+          if (!everStarted) throw e
+          page.results.push({ width, error: e.message })
+        }
+      }
+      if (o.reflow && page.results.length && !aborted()) {
+        try {
+          const b = await browserFor(320)
           const opened = await b.open(url, o.timeout)
           if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
           if (/html/i.test(opened.type)) { page.reflow = await b.evaluate(REFLOW); if (!o.quiet && (page.reflow.overflow || page.reflow.clipped.length)) log(`${url} @320 reflow: overflow ${page.reflow.overflow}px, ${page.reflow.clipped.length} clipped`) }
         } catch (e) { page.reflow = { error: e.message } }
       }
+      if (aborted()) break // the page it was on is not reported half done
       if (o.list && o.crawl) console.log(url)
       if (page.results.length || o.list) report.pages.push(page)
       if (o.onPage) o.onPage(page, 'done')
       if (o.onQueue) o.onQueue(audited, queue.length)
       if (o.crawl && depth < o.depth) {
-        for (const href of discovered) {
+        for (const href of discovered || []) {
           const n = normalizeUrl(href, url)
           if (!n || seen.has(n) || !sameOrigin(n, url) || !looksLikePage(n)) continue
           seen.add(n)
@@ -691,13 +796,16 @@ export async function sweep(o, log = console.error) {
       }
       if (o.delay) await sleep(o.delay)
     }
-    if (queue.length && o.maxPages) report.capped = { atPages: o.maxPages, left: queue.length }
+    if (aborted()) report.aborted = true
+    else if (queue.length && o.maxPages) report.capped = { atPages: o.maxPages, left: queue.length }
   } finally {
-    for (const b of browsers.values()) await b.close()
+    if (o.signal) o.signal.removeEventListener('abort', onAbort)
+    await Promise.all([...browsers.values()].map((b) => b.close()))
     if (egress) { report.refused = egress.refused; await egress.close() }
   }
   if (o.list) return { report, exit: 0 }
   if (!report.pages.length) {
+    if (report.aborted) throw new Error('the sweep was aborted before any page was audited')
     const why = report.skipped.map((k) => `  ${k.url} — ${k.why}`).join('\n')
     throw new Error(`no page was audited${why ? ':\n' + why : ''}`)
   }

@@ -421,3 +421,137 @@ test('--login: the capture keeps the swept site\'s cookies and local storage, an
     assert.equal(s.login, `${base}/login`); assert.equal(s.tool, 'wcag-sweep')
   } finally { siteServer.close() }
 })
+
+// ── a browser that stops answering (#47) ────────────────────────────────────
+// The connection is played by the test, so these need no browser.
+function wired(callTimeout = 60) {
+  const b = new Browser('unused', 1280, [], { callTimeout })
+  const sent = []
+  b.ws = { send: (s) => sent.push(JSON.parse(s)), close() {} }
+  b.wire(); b.session = 'S'
+  return { b, sent, say: (d) => b.ws.onmessage({ data: JSON.stringify(d) }) }
+}
+
+test('a call the browser never answers is rejected within its timeout, and that browser is finished', async () => {
+  const { b, sent } = wired(60)
+  const t0 = Date.now()
+  await assert.rejects(b.send('Runtime.evaluate', {}, 'S'), /timed out after 60 ms: the page stopped answering/)
+  assert.ok(Date.now() - t0 < 2000, 'within its own timeout')
+  assert.ok(b.dead, 'whatever stopped it answering is still there for the next call')
+  await assert.rejects(b.send('Runtime.evaluate', {}, 'S'), /timed out after 60 ms/)
+  assert.equal(sent.length, 1, 'a call on a finished browser is rejected at once and never sent')
+  await assert.rejects(wired(40).b.send('Page.navigate', { url: 'http://x.test/' }, 'S'), /timed out after 40 ms: the page did not start to load/)
+})
+
+test('an answered call settles and its timer goes with it; an error answer rejects that call alone', async () => {
+  const { b, sent, say } = wired(60)
+  const ok = b.send('A.b', {}, 'S'), bad = b.send('C.d', {}, 'S')
+  say({ id: sent[0].id, result: { v: 1 } }); say({ id: sent[1].id, error: { message: 'nope' } })
+  assert.deepEqual(await ok, { v: 1 }); await assert.rejects(bad, /nope/)
+  await new Promise((r) => setTimeout(r, 150))
+  assert.equal(b.dead, null, 'no timer was left to fire')
+})
+
+test('a crashed tab, a detached tab, a closed connection and a kill each reject every call still waiting', async () => {
+  const ways = [
+    [(k) => k.say({ method: 'Inspector.targetCrashed', params: {}, sessionId: 'S' }), /the browser tab crashed/],
+    [(k) => k.say({ method: 'Target.detachedFromTarget', params: { sessionId: 'S' } }), /the browser tab crashed/],
+    [(k) => k.b.ws.onclose(), /the browser closed its connection/],
+    [(k) => k.b.kill(new Error('the sweep was aborted')), /the sweep was aborted/],
+  ]
+  for (const [how, expected] of ways) {
+    const k = wired(60000)
+    const waiting = [k.b.send('Runtime.evaluate', {}, 'S'), k.b.evaluate('1')]
+    how(k)
+    for (const w of waiting) await assert.rejects(w, expected)
+    await assert.rejects(k.b.evaluate('2'), expected, 'and every call after it')
+  }
+  const other = wired(60000)
+  other.say({ method: 'Target.detachedFromTarget', params: { sessionId: 'another tab' } })
+  assert.equal(other.b.dead, null, 'the detach of another tab is not this one')
+  other.b.kill()
+})
+
+test('open(): the page timeout covers a look at the page that never comes back', async () => {
+  const { b, sent, say } = wired(60000)
+  b.ws.send = (s) => { const d = JSON.parse(s); sent.push(d); if (d.method === 'Page.navigate') queueMicrotask(() => say({ id: d.id, result: {} })) }
+  const t0 = Date.now()
+  await assert.rejects(b.open('http://x.test/', 150), /timed out after 150 ms: the page stopped answering/)
+  assert.ok(Date.now() - t0 < 5000, 'the 150 ms the page was given, not the 60 s a call is otherwise allowed')
+  assert.deepEqual(sent.map((d) => d.method), ['Page.navigate', 'Runtime.evaluate'])
+})
+
+test('a real browser: a crashed tab and a killed browser each reject the call that was waiting', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const crashed = new Browser(chrome, 1280, [], { callTimeout: 20000 })
+  await crashed.start()
+  try {
+    const waiting = crashed.evaluate('new Promise(() => {})')
+    crashed.send('Page.crash', {}, crashed.session).catch(() => {})
+    await assert.rejects(waiting, /the browser tab crashed/)
+    await assert.rejects(crashed.evaluate('1'), /the browser tab crashed/)
+  } finally { await crashed.close() }
+  const killed = new Browser(chrome, 1280, [], { callTimeout: 20000 })
+  await killed.start()
+  try {
+    const waiting = killed.evaluate('new Promise(() => {})')
+    killed.proc.kill('SIGKILL')
+    await assert.rejects(waiting, /the browser exited|the browser closed its connection|the connection to the browser failed/)
+  } finally { await killed.close() }
+})
+
+const doc = (title, body) => `<!doctype html><html lang="en"><head><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`
+
+// A site whose second page wedges its tab (a script that never yields) and
+// whose third crashes it. Each is that page's failure and no one else's: the
+// page after is audited by a browser started to replace the one that died.
+test('sweep: a page that wedges and a page that crashes fail alone, and the sweep moves on with a new browser', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  const start = Browser.prototype.start
+  Browser.prototype.start = async function () { started.push(this); return start.call(this) }
+  const site = createServer((req, res) => {
+    // Never answered: the page is still loading when its tab dies.
+    if (req.url === '/crash.png') { const b = started.at(-1); setTimeout(() => b.send('Page.crash', {}, b.session).catch(() => {}), 200); return }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    if (req.url === '/') return res.end(doc('Home', '<p><a href="/a-wedge">a</a> <a href="/b-crash">b</a> <a href="/c-fine">c</a></p>'))
+    if (req.url === '/a-wedge') return res.end(doc('Wedge', '<script>for (;;) {}</script>'))
+    if (req.url === '/b-crash') return res.end(doc('Crash', '<img src="/crash.png" alt="">'))
+    res.end(doc('Fine', '<p>Fine.</p>'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '3000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const t0 = Date.now()
+    const { report } = await sweep(o, () => {})
+    const by = Object.fromEntries(report.pages.map((p) => [new URL(p.url).pathname, p.results[0]]))
+    assert.deepEqual(Object.keys(by), ['/', '/a-wedge', '/b-crash', '/c-fine'])
+    assert.match(by['/a-wedge'].error, /timed out after 3000 ms/)
+    assert.match(by['/b-crash'].error, /the browser tab crashed/)
+    assert.ok(Array.isArray(by['/'].violations) && Array.isArray(by['/c-fine'].violations), 'the pages before and after were audited')
+    assert.equal(started.length, 3, 'one browser, and one more for each that died')
+    assert.ok(started[0].dead && started[1].dead)
+    assert.equal(report.summary.errors, 2)
+    assert.ok(Date.now() - t0 < 40000, 'each failure cost its own timeout at most')
+  } finally { Browser.prototype.start = start; site.closeAllConnections(); site.close() }
+})
+
+test('sweep: an abort ends it in the middle of a page, with the pages before it', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const ac = new AbortController()
+  const site = createServer((req, res) => {
+    if (req.url !== '/' && req.url !== '/stuck') { res.writeHead(404); return res.end() } // the favicon
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    if (req.url === '/') return res.end(doc('Home', '<p><a href="/stuck">stuck</a></p>'))
+    setTimeout(() => ac.abort(), 700)
+    res.end(doc('Stuck', '<script>for (;;) {}</script>'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '120000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const t0 = Date.now()
+    const { report } = await sweep({ ...o, signal: ac.signal }, () => {})
+    assert.equal(report.aborted, true)
+    assert.deepEqual(report.pages.map((p) => new URL(p.url).pathname), ['/'], 'the page it was on is left out, not reported half done')
+    assert.equal(report.capped, undefined)
+    assert.ok(Date.now() - t0 < 30000, 'long before the two minutes the stuck page was allowed')
+    await assert.rejects(sweep({ ...o, signal: ac.signal }, () => {}), /aborted before any page was audited/)
+  } finally { site.closeAllConnections(); site.close() }
+})

@@ -124,6 +124,11 @@ It finds Chrome, Edge or Chromium on Windows, macOS and Linux; --chrome <path>
 or the WCAG_SWEEP_CHROME variable overrides. Each width gets its own headless
 instance with a throwaway profile, deleted when the run ends.
 
+A browser can stop answering: its tab crashes or is killed for memory, a
+page's script never yields, the process dies. That is one page's failure and
+not the sweep's. The page is recorded as failed at that width within
+--timeout, the browser is replaced, and the next page is audited as usual.
+
 axe-core is vendored in vendor/axe-core/ rather than fetched: version 4.11.4,
 unmodified, with its MPL-2.0 licence beside it and its SHA-256 pinned in the
 script. A copy that does not match the checksum refuses to run, because an audit
@@ -142,5 +147,7 @@ Tests
 
     node --test
 
-runs the unit tests beside the script: argument parsing, URL canonicalisation,
-the public-address guard, the summary and the report. They need no browser.
+runs the tests beside the script: argument parsing, URL canonicalisation, the
+public-address guard and its filter, the summary, the report, and what happens
+when a browser stops answering. Most need no browser; the ones that drive a
+real one skip themselves where no Chrome, Edge or Chromium is installed.
