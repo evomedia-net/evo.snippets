@@ -87,10 +87,11 @@ How each page is rendered
                        One browser serves them all, resized before each page.
   --html <attr=value>  Set an attribute on <html> before the rules run, e.g.
                        --html data-a11y=on to audit a site's accessibility mode.
-  --timeout <ms>       How long a page may take to load, and how long any one step
-                       on it may go unanswered (default 30000). Past it that page
-                       is recorded as failed and the sweep moves on; a browser
-                       that crashed or stopped answering is replaced first.
+  --timeout <ms>       How long a page may take to load (default 30000). The
+                       checks on a loaded page get three times as long. Past
+                       either, that page is recorded as failed and the sweep
+                       moves on; a browser that crashed or stopped answering is
+                       replaced first.
   --delay <ms>         Pause between page loads, politeness for the target (default 500).
   --restart-every <n>  Start a new browser every n pages, so a long crawl gives
                        back the memory a browser has gathered (default 0, never).
@@ -544,8 +545,10 @@ export function findChrome(explicit) {
 // A browser can stop answering: its tab crashes or is killed for memory, a
 // page's script never yields, the process dies. None of those sends a reply to
 // the call that was waiting, so nothing here waits without a limit. Every call
-// has `callTimeout` ms to be answered; a crashed tab, a closed connection or
-// an exited process rejects every call still waiting at once. Either way the
+// has `callTimeout` ms to be answered, and the checks run on a loaded page,
+// which are real work on a large one, have three times that; a crashed tab, a
+// closed connection or an exited process rejects every call still waiting at
+// once. Either way the
 // browser is `dead` from then on: whatever stopped it answering is still
 // there for the next call, so the sweep replaces it before its next page.
 export class Browser {
@@ -560,7 +563,7 @@ export class Browser {
     // Headed only to let a person sign in (--login): a window they can use.
     const mode = this.headless ? ['--headless=new', '--hide-scrollbars'] : []
     this.proc = spawn(this.exe, [...mode, `--remote-debugging-port=${this.port}`, `--user-data-dir=${this.profile}`, '--no-first-run', '--no-default-browser-check', '--disable-sync', '--disable-extensions', '--mute-audio', `--window-size=${this.width},900`, ...this.flags, ...extra, 'about:blank'], { stdio: 'ignore' })
-    this.proc.on('exit', () => this.fail(new Error('the browser exited')))
+    this.proc.on('exit', () => this.fail(died('the browser exited')))
     this.proc.on('error', (e) => this.fail(new Error(`the browser could not be started: ${e.message}`)))
     let wsUrl
     for (let i = 0; i < 150 && !wsUrl; i++) {
@@ -584,11 +587,11 @@ export class Browser {
     this.ws.onmessage = (m) => {
       const d = JSON.parse(m.data)
       if (d.id && this.pending.has(d.id)) { const p = this.pending.get(d.id); this.pending.delete(d.id); clearTimeout(p.timer); d.error ? p.reject(new Error(d.error.message)) : p.resolve(d.result) }
-      else if (d.method === 'Inspector.targetCrashed' || (d.method === 'Target.detachedFromTarget' && d.params && d.params.sessionId === this.session)) this.fail(new Error('the browser tab crashed'))
+      else if (d.method === 'Inspector.targetCrashed' || (d.method === 'Target.detachedFromTarget' && d.params && d.params.sessionId === this.session)) this.fail(died('the browser tab crashed'))
       else if (d.method && this.listeners.has(d.method)) for (const fn of this.listeners.get(d.method)) fn(d.params, d.sessionId)
     }
-    this.ws.onclose = () => this.fail(new Error('the browser closed its connection'))
-    this.ws.onerror = () => this.fail(new Error('the connection to the browser failed'))
+    this.ws.onclose = () => this.fail(died('the browser closed its connection'))
+    this.ws.onerror = () => this.fail(died('the connection to the browser failed'))
   }
   // The end of this browser, for whatever reason: every call still waiting is
   // rejected with it now, and every later call at once.
@@ -634,21 +637,26 @@ export class Browser {
   }
   // `timeout` is how long this call may wait; `of` is the limit the caller
   // was given, when this call has only what is left of it.
-  send(method, params = {}, sessionId, timeout = this.callTimeout, of = timeout) {
+  send(method, params = {}, sessionId, timeout = this.callTimeout, of = timeout, what = method === 'Page.navigate' ? 'the page did not start to load' : 'the page stopped answering') {
     if (this.dead) return Promise.reject(this.dead)
     const id = ++this.id
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error(`timed out after ${of} ms: ${method === 'Page.navigate' ? 'the page did not start to load' : 'the page stopped answering'}`)), timeout)
+      const timer = setTimeout(() => this.fail(new Error(`timed out after ${of} ms: ${what}`)), timeout)
       this.pending.set(id, { resolve, reject, timer })
       try { this.ws.send(JSON.stringify({ id, method, params, sessionId })) } catch { this.fail(new Error('the browser closed its connection')) }
     })
   }
   async setUserAgent(s) { await this.send('Network.setUserAgentOverride', { userAgent: s }, this.session) }
-  async evaluate(expression, timeout, of) {
-    const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.session, timeout, of)
+  async evaluate(expression, timeout, of, what) {
+    const r = await this.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, this.session, timeout, of, what)
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text)
     return r.result.value
   }
+  // The checks themselves: running the rules, measuring the reflow. On a large
+  // page these keep the tab busy for a while, which from here looks the same
+  // as a tab that has stopped answering, so they are given three times as long
+  // as a load before the page is given up on.
+  work(expression) { return this.evaluate(expression, this.callTimeout * 3, undefined, 'the checks on the page did not finish') }
   // `timeout` covers the whole load: the navigation and every look at whether
   // the page has finished share it, so a call that never comes back is inside
   // the limit and not beside it.
@@ -672,6 +680,9 @@ export class Browser {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// The browser or its tab died, as against a call that went unanswered: the
+// difference decides whether a page is worth one more try (see the sweep).
+const died = (message) => Object.assign(new Error(message), { died: true })
 
 // ── the checks ──────────────────────────────────────────────────────────────
 const AXE_RUN = (tags) => `axe.run(document, { runOnly: { type: 'tag', values: ${JSON.stringify(tags)} }, resultTypes: ['violations', 'incomplete'] }).then((r) => ({
@@ -814,7 +825,14 @@ export async function sweep(o, log = console.error) {
       const page = { url, title: '', results: [] }
       if (o.onPage) o.onPage(page, 'start')
       let discovered = null
-      for (const width of o.widths) {
+      // A browser that dies under a page may have been brought down by the
+      // page before it, whose tab was still open while this one began to
+      // load. So the first time it happens to a page, that width is tried
+      // once more in the new browser: an innocent page is then audited, and
+      // one that kills its own tab does so again and is recorded.
+      let triedAgain = false
+      for (let i = 0; i < o.widths.length; i++) {
+        const width = o.widths[i]
         if (aborted()) break
         try {
           const b = await browserAt(width)
@@ -832,8 +850,7 @@ export async function sweep(o, log = console.error) {
           }
           if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
           if (o.list) { if (!discovered) discovered = await b.evaluate(LINKS); continue }
-          await b.evaluate(axeSource + '; true')
-          const axe = await b.evaluate(AXE_RUN(o.tags))
+          const axe = await b.work(`${axeSource};\n${AXE_RUN(o.tags)}`)
           // The links come from the first width that gets this far, so a page
           // that fails at one width still leads the crawl on.
           if (o.crawl && !discovered) discovered = await b.evaluate(LINKS)
@@ -846,16 +863,22 @@ export async function sweep(o, log = console.error) {
           // not a page's fault, and there is nothing to move on with.
           if (aborted()) break
           if (!everStarted) throw e
+          if (e.died && !triedAgain) { triedAgain = true; i--; continue }
           page.results.push({ width, error: e.message })
         }
       }
-      if (o.reflow && page.results.length && !aborted()) {
+      for (let attempt = 0; o.reflow && page.results.length && !aborted() && attempt < 2; attempt++) {
         try {
           const b = await browserAt(320)
           const opened = await b.open(url, o.timeout)
           if (o.html) await b.evaluate(`document.documentElement.setAttribute(${JSON.stringify(o.html[0])}, ${JSON.stringify(o.html[1])}); true`)
-          if (/html/i.test(opened.type)) { page.reflow = await b.evaluate(REFLOW); if (!o.quiet && (page.reflow.overflow || page.reflow.clipped.length)) log(`${url} @320 reflow: overflow ${page.reflow.overflow}px, ${page.reflow.clipped.length} clipped`) }
-        } catch (e) { page.reflow = { error: e.message } }
+          if (/html/i.test(opened.type)) { page.reflow = await b.work(REFLOW); if (!o.quiet && (page.reflow.overflow || page.reflow.clipped.length)) log(`${url} @320 reflow: overflow ${page.reflow.overflow}px, ${page.reflow.clipped.length} clipped`) }
+          break
+        } catch (e) {
+          if (e.died && !triedAgain && !aborted()) { triedAgain = true; continue }
+          page.reflow = { error: e.message }
+          break
+        }
       }
       if (aborted()) break // the page it was on is not reported half done
       pagesOnIt++

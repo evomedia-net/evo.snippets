@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url'
 import { createServer, request } from 'node:http'
 import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, startEgressFilter, Browser, findChrome, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
 import { parseHeader, SIGNED_IN_EXCLUDE, withHeaders, domainMatch, toCookieParams, seedStorageScript, writeSession, readSession, isSignInPage, sweep, captureSession } from './wcag-sweep.mjs'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { publicAddresses, isLocalName, requestAt, readSitemap } from './wcag-sweep.mjs'
 import { createServer as createTcpServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -483,6 +483,31 @@ test('open(): the page timeout covers a look at the page that never comes back',
   assert.deepEqual(sent.map((d) => d.method), ['Page.navigate', 'Runtime.evaluate'])
 })
 
+test('the checks on a page get three times as long as a call, and say so when they run out', async () => {
+  const { b, sent } = wired(50)
+  const t0 = Date.now()
+  await assert.rejects(b.work('axe.run()'), /timed out after 150 ms: the checks on the page did not finish/)
+  assert.ok(Date.now() - t0 >= 140, 'not cut off at the 50 ms a call gets')
+  assert.equal(sent[0].method, 'Runtime.evaluate')
+})
+
+// Rules that take longer to run than a page is allowed to load: slow work on a
+// loaded page, not a page that has stopped answering. The copy of axe-core
+// here answers after two seconds; the page timeout is one and a half.
+test('sweep: rules that run for longer than the page timeout are still waited for', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wcag-sweep-test-'))
+  const slowAxe = join(dir, 'slow-axe.js')
+  writeFileSync(slowAxe, 'window.axe = { run: () => new Promise((done) => setTimeout(() => done({ violations: [], incomplete: [] }), 2000)) }')
+  const site = createServer((req, res) => { res.writeHead(req.url === '/' ? 200 : 404, { 'Content-Type': 'text/html' }); res.end(req.url === '/' ? doc('Home', '<p>One page.</p>') : '') })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--delay', '0', '--timeout', '1500', '--axe', slowAxe, '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const { report } = await sweep(o, () => {})
+    assert.deepEqual(report.pages[0].results, [{ width: 1280, violations: [], incomplete: [] }])
+    assert.equal(report.summary.errors, 0)
+  } finally { site.close(); rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('a real browser: a crashed tab and a killed browser each reject the call that was waiting', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
   const crashed = new Browser(chrome, 1280, [], { callTimeout: 20000 })
   await crashed.start()
@@ -504,8 +529,9 @@ test('a real browser: a crashed tab and a killed browser each reject the call th
 const doc = (title, body) => `<!doctype html><html lang="en"><head><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`
 
 // A site whose second page wedges its tab (a script that never yields) and
-// whose third crashes it. Each is that page's failure and no one else's: the
-// page after is audited by a browser started to replace the one that died.
+// whose third crashes it, every time it is opened. Each is that page's failure
+// and no one else's: the page after is audited by a browser started to replace
+// the one that died. The page that crashes is tried twice before it is given up on.
 test('sweep: a page that wedges and a page that crashes fail alone, and the sweep moves on with a new browser', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
   const started = []
   const start = Browser.prototype.start
@@ -529,10 +555,44 @@ test('sweep: a page that wedges and a page that crashes fail alone, and the swee
     assert.match(by['/a-wedge'].error, /timed out after 3000 ms/)
     assert.match(by['/b-crash'].error, /the browser tab crashed/)
     assert.ok(Array.isArray(by['/'].violations) && Array.isArray(by['/c-fine'].violations), 'the pages before and after were audited')
-    assert.equal(started.length, 3, 'one browser, and one more for each that died')
-    assert.ok(started[0].dead && started[1].dead)
+    assert.equal(started.length, 4, 'one browser, one more for the page that wedged, and two for the page that crashed twice')
+    assert.ok(started[0].dead && started[1].dead && started[2].dead)
+    assert.ok(started[1].dead.died && !started[0].dead.died, 'a tab that crashed died; a page that stopped answering did not')
     assert.equal(report.summary.errors, 2)
     assert.ok(Date.now() - t0 < 40000, 'each failure cost its own timeout at most')
+  } finally { Browser.prototype.start = start; site.closeAllConnections(); site.close() }
+})
+
+// A browser can die under a page that did nothing wrong: the tab left by the
+// page before it, one that takes memory until it is killed, can go while the
+// next page is still loading. So a page the browser dies under is tried once
+// more in the new browser. Here the tab is crashed the first time the page's
+// image is asked for, and never again.
+test('sweep: a page the browser dies under is tried once more, and audited', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  const start = Browser.prototype.start
+  Browser.prototype.start = async function () { started.push(this); return start.call(this) }
+  const asked = { next: 0, image: 0 }
+  const site = createServer((req, res) => {
+    if (req.url === '/held.png') {
+      if (asked.image++) { res.writeHead(404); return res.end() }
+      const b = started.at(-1); setTimeout(() => b.send('Page.crash', {}, b.session).catch(() => {}), 200); return // never answered
+    }
+    if (req.url !== '/' && req.url !== '/next') { res.writeHead(404); return res.end() }
+    if (req.url === '/next') asked.next++
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(req.url === '/' ? doc('Home', '<p><a href="/next">next</a></p>') : doc('Next', '<p>Fine.</p><img src="/held.png" alt="">'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '15000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const { report } = await sweep(o, () => {})
+    const next = report.pages.find((p) => p.url.endsWith('/next'))
+    assert.ok(next && Array.isArray(next.results[0].violations), `the page was audited: ${JSON.stringify(next && next.results)}`)
+    assert.equal(report.summary.errors, 0)
+    assert.equal(asked.next, 2, 'opened twice: once as the browser died, once in the new one')
+    assert.equal(started.length, 2)
+    assert.ok(started[0].dead && started[0].dead.died)
   } finally { Browser.prototype.start = start; site.closeAllConnections(); site.close() }
 })
 

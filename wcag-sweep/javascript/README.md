@@ -135,8 +135,12 @@ pages, which gives a long crawl back the memory a browser has gathered.
 
 A browser can stop answering: its tab crashes or is killed for memory, a
 page's script never yields, the process dies. That is one page's failure and
-not the sweep's. The page is recorded as failed at that width within
-`--timeout`, the browser is replaced, and the next page is audited as usual.
+not the sweep's. The page is recorded as failed at that width, the browser is
+replaced, and the next page is audited as usual. A page has `--timeout` to
+load, and the checks on it have three times that, because running the rules
+on a large page is real work and not a tab that has stopped answering.
+A page the browser dies under is tried once more in the new browser first,
+because the page before it may have been the cause.
 
 axe-core is vendored in `vendor/axe-core/` rather than fetched: version 4.11.4,
 unmodified, with its MPL-2.0 licence beside it and its SHA-256 pinned in the
