@@ -23,6 +23,9 @@ Added
 Fixed
 ~~~~~
 
+- wcag-sweep: hold sitemaps to --public-only, refuse a host name with no dot, and test the ways the guard is usually got round (#52 (https://github.com/evomedia-net/evo.snippets/pull/52))
+- wcag-sweep: sweep every width in one browser, and add --restart-every to start a new one every n pages (#52 (https://github.com/evomedia-net/evo.snippets/pull/52))
+- wcag-sweep: fail a page whose browser stops answering, replace the browser, and end at once on abort (#52 (https://github.com/evomedia-net/evo.snippets/pull/52))
 - wcag-sweep: keep reports from scrolling sideways at 320px, and give them their own focus ring (#46 (https://github.com/evomedia-net/evo.snippets/pull/46))
 - wcag-sweep: send every request a page makes through a public-only egress filter (#42 (https://github.com/evomedia-net/evo.snippets/pull/42))
 - confetti-burst: bring playground.js back in step with the site, with two accessibility fixes (#40 (https://github.com/evomedia-net/evo.snippets/pull/40))

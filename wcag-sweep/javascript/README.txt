@@ -102,7 +102,9 @@ For a scanner that takes addresses from strangers
 --public-only resolves every hostname, before the first request and again
 after any redirect, and refuses anything on a private, loopback, link-local,
 carrier-grade NAT, multicast or reserved address (IPv4 carried inside IPv6
-included), or named localhost, .localhost or .local. Off by default,
+included), or named localhost, .localhost or .local, or with no dot in
+its name at all: db and intranet are names on the network running the
+scan, whatever they resolve to. Off by default,
 because the commonest use of this tool is a dev server on localhost. On for
 anything that lets other people choose the target.
 
@@ -117,12 +119,28 @@ it, loopback included, and WebRTC is held to proxied traffic. The report counts
 what was refused without naming it, because a public report listing the
 internal names a page probed for would tell its author which ones exist.
 
+Sitemaps are held to the same rule. Under --public-only the sitemap, every
+child a sitemap index names and every redirect on the way is checked first,
+and fetched at the address that was checked.
+
 The browser and axe-core
 ------------------------
 
 It finds Chrome, Edge or Chromium on Windows, macOS and Linux; --chrome <path>
-or the WCAG_SWEEP_CHROME variable overrides. Each width gets its own headless
-instance with a throwaway profile, deleted when the run ends.
+or the WCAG_SWEEP_CHROME variable overrides. One headless instance serves the
+whole sweep, with a throwaway profile that is deleted when the run ends: its
+viewport is set to each width before a page is opened at it, so three widths
+do not mean three browsers. --restart-every <n> starts a new one every n
+pages, which gives a long crawl back the memory a browser has gathered.
+
+A browser can stop answering: its tab crashes or is killed for memory, a
+page's script never yields, the process dies. That is one page's failure and
+not the sweep's. The page is recorded as failed at that width, the browser is
+replaced, and the next page is audited as usual. A page has --timeout to
+load, and the checks on it have three times that, because running the rules
+on a large page is real work and not a tab that has stopped answering.
+A page the browser dies under is tried once more in the new browser first,
+because the page before it may have been the cause.
 
 axe-core is vendored in vendor/axe-core/ rather than fetched: version 4.11.4,
 unmodified, with its MPL-2.0 licence beside it and its SHA-256 pinned in the
@@ -142,5 +160,7 @@ Tests
 
     node --test
 
-runs the unit tests beside the script: argument parsing, URL canonicalisation,
-the public-address guard, the summary and the report. They need no browser.
+runs the tests beside the script: argument parsing, URL canonicalisation, the
+public-address guard and its filter, the summary, the report, and what happens
+when a browser stops answering. Most need no browser; the ones that drive a
+real one skip themselves where no Chrome, Edge or Chromium is installed.

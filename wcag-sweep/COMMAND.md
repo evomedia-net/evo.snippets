@@ -99,16 +99,18 @@ happens once, in a browser window you can use.
 
 | Option | What it does |
 | --- | --- |
-| `--width <list>` | Viewport widths, comma separated. Each page is audited once per width. Default `1280`. `375` is a phone; `320` is the floor WCAG 1.4.10 names. |
+| `--width <list>` | Viewport widths, comma separated. Each page is audited once per width, in one browser that is resized before each page. Default `1280`. `375` is a phone; `320` is the floor WCAG 1.4.10 names. |
 | `--html <attr=value>` | Set an attribute on `<html>` before the rules run. For sites with an accessibility mode keyed on such an attribute. |
-| `--timeout <ms>` | Per-page load timeout. Default 30000. |
+| `--timeout <ms>` | How long a page may take to load. The checks on a loaded page get three times as long. Past either, the page is recorded as failed and the sweep moves on; a browser that crashed or stopped answering is replaced first. Default 30000. |
 | `--delay <ms>` | Pause between page loads, out of politeness to the target. Default 500. |
+| `--restart-every <n>` | Start a new browser every n pages, so a long crawl gives back the memory a browser has gathered. Default 0, never. A signed-in sweep goes back to the session it started with at each restart. |
 | `--user-agent <s>` | Override the User-Agent. The default names this tool and links to this repository. |
 
 ```
 ./run.sh https://example.com --crawl --width 1280,375
 ./run.sh https://example.com --html data-a11y=on
 ./run.sh https://example.com --crawl --timeout 60000 --delay 1000
+./run.sh https://example.com --crawl --max-pages 0 --restart-every 50
 ```
 
 ## What is checked
@@ -117,7 +119,7 @@ happens once, in a browser window you can use.
 | --- | --- |
 | `--tags <list>` | axe-core tags to run. Default `wcag2a,wcag2aa,wcag21a,wcag21aa,wcag22aa` — WCAG 2.0, 2.1 and 2.2, Level A and AA, nothing else. |
 | `--reflow` | Also measure, at 320px, sideways overflow of the page (1.4.10) and text that clips when WCAG's spacing overrides are applied (1.4.12). |
-| `--public-only` | Refuse any address whose host resolves to a private, loopback, link-local or carrier-grade NAT address, or is named `localhost`, `*.localhost` or `*.local` — before the first request and again after a redirect. For a scanner that takes addresses from strangers. |
+| `--public-only` | Refuse any address whose host resolves to a private, loopback, link-local or carrier-grade NAT address, is named `localhost`, `*.localhost` or `*.local`, or has no dot in its name — before the first request and again after a redirect. Everything a page loads, and every sitemap, is held to the same rule. For a scanner that takes addresses from strangers. |
 
 ```
 ./run.sh https://example.com --crawl --reflow

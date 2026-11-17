@@ -126,6 +126,9 @@ one-line step in any CI system turns it into a check:
 | `vendored axe-core does not match the pinned checksum` | `vendor/axe-core/axe.min.js` is not the file this version was tested with. Re-download the folder. |
 | `no page was audited` | Every address was skipped; the lines under it say why (not public, not HTML, redirected elsewhere). |
 | `timed out after 30000 ms` on a page | The page did not finish loading in time. Raise `--timeout`, or check the page by hand. |
+| `timed out after 30000 ms: the page stopped answering` | The page's tab stopped responding, most often a script that never yields. That page is recorded as failed and the sweep carries on in a new browser. |
+| `timed out after 90000 ms: the checks on the page did not finish` | The page loaded, and the rules were still running on it after three times `--timeout`. A very large page on a slow machine can do that: raise `--timeout`. |
+| `the browser tab crashed` on a page | The tab died while the page was open, twice running, most often for lack of memory. That page is recorded as failed and the sweep carries on in a new browser. |
 | The sweep stops at 25 pages | That is `--max-pages`. Raise it, or use `--sitemap` for the full list. |
 
 ---

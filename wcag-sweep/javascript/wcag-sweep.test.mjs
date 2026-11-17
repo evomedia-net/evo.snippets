@@ -14,7 +14,9 @@ import { fileURLToPath } from 'node:url'
 import { createServer, request } from 'node:http'
 import { parseArgs, UsageError, normalizeUrl, sameOrigin, looksLikePage, isPrivateAddress, assertPublicHost, chromeCandidates, startEgressFilter, Browser, findChrome, summarize, formatSummary, renderHtml, AXE_SHA256, AXE_VERSION, DEFAULT_TAGS, HELP } from './wcag-sweep.mjs'
 import { parseHeader, SIGNED_IN_EXCLUDE, withHeaders, domainMatch, toCookieParams, seedStorageScript, writeSession, readSession, isSignInPage, sweep, captureSession } from './wcag-sweep.mjs'
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { publicAddresses, isLocalName, requestAt, readSitemap } from './wcag-sweep.mjs'
+import { createServer as createTcpServer } from 'node:net'
 import { tmpdir } from 'node:os'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -420,4 +422,420 @@ test('--login: the capture keeps the swept site\'s cookies and local storage, an
     assert.deepEqual(s.localStorage, { [base]: { token: 't1' } })
     assert.equal(s.login, `${base}/login`); assert.equal(s.tool, 'wcag-sweep')
   } finally { siteServer.close() }
+})
+
+// ── a browser that stops answering (#47) ────────────────────────────────────
+// The connection is played by the test, so these need no browser.
+function wired(callTimeout = 60) {
+  const b = new Browser('unused', 1280, [], { callTimeout })
+  const sent = []
+  b.ws = { send: (s) => sent.push(JSON.parse(s)), close() {} }
+  b.wire(); b.session = 'S'
+  return { b, sent, say: (d) => b.ws.onmessage({ data: JSON.stringify(d) }) }
+}
+
+test('a call the browser never answers is rejected within its timeout, and that browser is finished', async () => {
+  const { b, sent } = wired(60)
+  const t0 = Date.now()
+  await assert.rejects(b.send('Runtime.evaluate', {}, 'S'), /timed out after 60 ms: the page stopped answering/)
+  assert.ok(Date.now() - t0 < 2000, 'within its own timeout')
+  assert.ok(b.dead, 'whatever stopped it answering is still there for the next call')
+  await assert.rejects(b.send('Runtime.evaluate', {}, 'S'), /timed out after 60 ms/)
+  assert.equal(sent.length, 1, 'a call on a finished browser is rejected at once and never sent')
+  await assert.rejects(wired(40).b.send('Page.navigate', { url: 'http://x.test/' }, 'S'), /timed out after 40 ms: the page did not start to load/)
+})
+
+test('an answered call settles and its timer goes with it; an error answer rejects that call alone', async () => {
+  const { b, sent, say } = wired(60)
+  const ok = b.send('A.b', {}, 'S'), bad = b.send('C.d', {}, 'S')
+  say({ id: sent[0].id, result: { v: 1 } }); say({ id: sent[1].id, error: { message: 'nope' } })
+  assert.deepEqual(await ok, { v: 1 }); await assert.rejects(bad, /nope/)
+  await new Promise((r) => setTimeout(r, 150))
+  assert.equal(b.dead, null, 'no timer was left to fire')
+})
+
+test('a crashed tab, a detached tab, a closed connection and a kill each reject every call still waiting', async () => {
+  const ways = [
+    [(k) => k.say({ method: 'Inspector.targetCrashed', params: {}, sessionId: 'S' }), /the browser tab crashed/],
+    [(k) => k.say({ method: 'Target.detachedFromTarget', params: { sessionId: 'S' } }), /the browser tab crashed/],
+    [(k) => k.b.ws.onclose(), /the browser closed its connection/],
+    [(k) => k.b.kill(new Error('the sweep was aborted')), /the sweep was aborted/],
+  ]
+  for (const [how, expected] of ways) {
+    const k = wired(60000)
+    const waiting = [k.b.send('Runtime.evaluate', {}, 'S'), k.b.evaluate('1')]
+    how(k)
+    for (const w of waiting) await assert.rejects(w, expected)
+    await assert.rejects(k.b.evaluate('2'), expected, 'and every call after it')
+  }
+  const other = wired(60000)
+  other.say({ method: 'Target.detachedFromTarget', params: { sessionId: 'another tab' } })
+  assert.equal(other.b.dead, null, 'the detach of another tab is not this one')
+  other.b.kill()
+})
+
+test('open(): the page timeout covers a look at the page that never comes back', async () => {
+  const { b, sent, say } = wired(60000)
+  b.ws.send = (s) => { const d = JSON.parse(s); sent.push(d); if (d.method === 'Page.navigate') queueMicrotask(() => say({ id: d.id, result: {} })) }
+  const t0 = Date.now()
+  await assert.rejects(b.open('http://x.test/', 150), /timed out after 150 ms: the page stopped answering/)
+  assert.ok(Date.now() - t0 < 5000, 'the 150 ms the page was given, not the 60 s a call is otherwise allowed')
+  assert.deepEqual(sent.map((d) => d.method), ['Page.navigate', 'Runtime.evaluate'])
+})
+
+test('the checks on a page get three times as long as a call, and say so when they run out', async () => {
+  const { b, sent } = wired(50)
+  const t0 = Date.now()
+  await assert.rejects(b.work('axe.run()'), /timed out after 150 ms: the checks on the page did not finish/)
+  assert.ok(Date.now() - t0 >= 140, 'not cut off at the 50 ms a call gets')
+  assert.equal(sent[0].method, 'Runtime.evaluate')
+})
+
+// Rules that take longer to run than a page is allowed to load: slow work on a
+// loaded page, not a page that has stopped answering. The copy of axe-core
+// here answers after two seconds; the page timeout is one and a half.
+test('sweep: rules that run for longer than the page timeout are still waited for', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wcag-sweep-test-'))
+  const slowAxe = join(dir, 'slow-axe.js')
+  writeFileSync(slowAxe, 'window.axe = { run: () => new Promise((done) => setTimeout(() => done({ violations: [], incomplete: [] }), 2000)) }')
+  const site = createServer((req, res) => { res.writeHead(req.url === '/' ? 200 : 404, { 'Content-Type': 'text/html' }); res.end(req.url === '/' ? doc('Home', '<p>One page.</p>') : '') })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--delay', '0', '--timeout', '1500', '--axe', slowAxe, '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const { report } = await sweep(o, () => {})
+    assert.deepEqual(report.pages[0].results, [{ width: 1280, violations: [], incomplete: [] }])
+    assert.equal(report.summary.errors, 0)
+  } finally { site.close(); rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('a real browser: a crashed tab and a killed browser each reject the call that was waiting', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const crashed = new Browser(chrome, 1280, [], { callTimeout: 20000 })
+  await crashed.start()
+  try {
+    const waiting = crashed.evaluate('new Promise(() => {})')
+    crashed.send('Page.crash', {}, crashed.session).catch(() => {})
+    await assert.rejects(waiting, /the browser tab crashed/)
+    await assert.rejects(crashed.evaluate('1'), /the browser tab crashed/)
+  } finally { await crashed.close() }
+  const killed = new Browser(chrome, 1280, [], { callTimeout: 20000 })
+  await killed.start()
+  try {
+    const waiting = killed.evaluate('new Promise(() => {})')
+    killed.proc.kill('SIGKILL')
+    await assert.rejects(waiting, /the browser exited|the browser closed its connection|the connection to the browser failed/)
+  } finally { await killed.close() }
+})
+
+const doc = (title, body) => `<!doctype html><html lang="en"><head><title>${title}</title></head><body><main><h1>${title}</h1>${body}</main></body></html>`
+
+// A site whose second page wedges its tab (a script that never yields) and
+// whose third crashes it, every time it is opened. Each is that page's failure
+// and no one else's: the page after is audited by a browser started to replace
+// the one that died. The page that crashes is tried twice before it is given up on.
+test('sweep: a page that wedges and a page that crashes fail alone, and the sweep moves on with a new browser', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  const start = Browser.prototype.start
+  Browser.prototype.start = async function () { started.push(this); return start.call(this) }
+  const site = createServer((req, res) => {
+    // Never answered: the page is still loading when its tab dies.
+    if (req.url === '/crash.png') { const b = started.at(-1); setTimeout(() => b.send('Page.crash', {}, b.session).catch(() => {}), 200); return }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    if (req.url === '/') return res.end(doc('Home', '<p><a href="/a-wedge">a</a> <a href="/b-crash">b</a> <a href="/c-fine">c</a></p>'))
+    if (req.url === '/a-wedge') return res.end(doc('Wedge', '<script>for (;;) {}</script>'))
+    if (req.url === '/b-crash') return res.end(doc('Crash', '<img src="/crash.png" alt="">'))
+    res.end(doc('Fine', '<p>Fine.</p>'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '3000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const t0 = Date.now()
+    const { report } = await sweep(o, () => {})
+    const by = Object.fromEntries(report.pages.map((p) => [new URL(p.url).pathname, p.results[0]]))
+    assert.deepEqual(Object.keys(by), ['/', '/a-wedge', '/b-crash', '/c-fine'])
+    assert.match(by['/a-wedge'].error, /timed out after 3000 ms/)
+    assert.match(by['/b-crash'].error, /the browser tab crashed/)
+    assert.ok(Array.isArray(by['/'].violations) && Array.isArray(by['/c-fine'].violations), 'the pages before and after were audited')
+    assert.equal(started.length, 4, 'one browser, one more for the page that wedged, and two for the page that crashed twice')
+    assert.ok(started[0].dead && started[1].dead && started[2].dead)
+    assert.ok(started[1].dead.died && !started[0].dead.died, 'a tab that crashed died; a page that stopped answering did not')
+    assert.equal(report.summary.errors, 2)
+    assert.ok(Date.now() - t0 < 40000, 'each failure cost its own timeout at most')
+  } finally { Browser.prototype.start = start; site.closeAllConnections(); site.close() }
+})
+
+// A browser can die under a page that did nothing wrong: the tab left by the
+// page before it, one that takes memory until it is killed, can go while the
+// next page is still loading. So a page the browser dies under is tried once
+// more in the new browser. Here the tab is crashed the first time the page's
+// image is asked for, and never again.
+test('sweep: a page the browser dies under is tried once more, and audited', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  const start = Browser.prototype.start
+  Browser.prototype.start = async function () { started.push(this); return start.call(this) }
+  const asked = { next: 0, image: 0 }
+  const site = createServer((req, res) => {
+    if (req.url === '/held.png') {
+      if (asked.image++) { res.writeHead(404); return res.end() }
+      const b = started.at(-1); setTimeout(() => b.send('Page.crash', {}, b.session).catch(() => {}), 200); return // never answered
+    }
+    if (req.url !== '/' && req.url !== '/next') { res.writeHead(404); return res.end() }
+    if (req.url === '/next') asked.next++
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(req.url === '/' ? doc('Home', '<p><a href="/next">next</a></p>') : doc('Next', '<p>Fine.</p><img src="/held.png" alt="">'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '15000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const { report } = await sweep(o, () => {})
+    const next = report.pages.find((p) => p.url.endsWith('/next'))
+    assert.ok(next && Array.isArray(next.results[0].violations), `the page was audited: ${JSON.stringify(next && next.results)}`)
+    assert.equal(report.summary.errors, 0)
+    assert.equal(asked.next, 2, 'opened twice: once as the browser died, once in the new one')
+    assert.equal(started.length, 2)
+    assert.ok(started[0].dead && started[0].dead.died)
+  } finally { Browser.prototype.start = start; site.closeAllConnections(); site.close() }
+})
+
+test('sweep: an abort ends it in the middle of a page, with the pages before it', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const ac = new AbortController()
+  const site = createServer((req, res) => {
+    if (req.url !== '/' && req.url !== '/stuck') { res.writeHead(404); return res.end() } // the favicon
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    if (req.url === '/') return res.end(doc('Home', '<p><a href="/stuck">stuck</a></p>'))
+    setTimeout(() => ac.abort(), 700)
+    res.end(doc('Stuck', '<script>for (;;) {}</script>'))
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--delay', '0', '--timeout', '120000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    const t0 = Date.now()
+    const { report } = await sweep({ ...o, signal: ac.signal }, () => {})
+    assert.equal(report.aborted, true)
+    assert.deepEqual(report.pages.map((p) => new URL(p.url).pathname), ['/'], 'the page it was on is left out, not reported half done')
+    assert.equal(report.capped, undefined)
+    assert.ok(Date.now() - t0 < 30000, 'long before the two minutes the stuck page was allowed')
+    await assert.rejects(sweep({ ...o, signal: ac.signal }, () => {}), /aborted before any page was audited/)
+  } finally { site.closeAllConnections(); site.close() }
+})
+
+// ── one browser for every width (#50) ───────────────────────────────────────
+// Every page here is clean at 1280px, shows an image with no alt text below
+// 500px, and has a box 350px wide: so each width has its own answer, and a
+// browser that was not really resized gives the wrong one.
+test('sweep: one browser serves every width and the reflow check, and --restart-every replaces it between pages', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const started = []
+  let alive = 0, most = 0
+  const start = Browser.prototype.start, close = Browser.prototype.close
+  Browser.prototype.start = async function () { started.push(this); most = Math.max(most, ++alive); return start.call(this) }
+  Browser.prototype.close = async function () { if (!this.counted) { this.counted = true; alive-- } return close.call(this) }
+  const paths = ['/', '/p2', '/p3', '/p4', '/p5']
+  const site = createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<!doctype html><html lang="en"><head><title>Page ${req.url}</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>.narrow{display:none}@media (max-width:500px){.narrow{display:block}}.rigid{width:350px}</style></head>
+<body><main><h1>Page ${req.url}</h1><ul>${paths.map((p) => `<li><a href="${p}">Page ${p}</a></li>`).join('')}</ul>
+<img class="narrow" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><div class="rigid">A box 350px wide.</div></main></body></html>`)
+  })
+  const base = `http://127.0.0.1:${await listen(site)}`
+  try {
+    const o = parseArgs([`${base}/`, '--crawl', '--width', '1280,375', '--reflow', '--restart-every', '2', '--delay', '0', '--timeout', '15000', '--fail-on', 'none', '--quiet', '--chrome', chrome])
+    assert.equal(o.restartEvery, 2); assert.equal(parseArgs([`${base}/`]).restartEvery, 0)
+    const { report } = await sweep(o, () => {})
+    assert.deepEqual(report.pages.map((p) => new URL(p.url).pathname), paths)
+    for (const p of report.pages) {
+      const [wide, phone] = p.results
+      assert.equal(wide.width, 1280); assert.equal(phone.width, 375)
+      assert.ok(!wide.violations.some((v) => v.id === 'image-alt'), `${p.url}: the image is hidden at 1280px`)
+      assert.ok(phone.violations.some((v) => v.id === 'image-alt'), `${p.url}: and shown, with no alt text, at 375px`)
+      assert.ok(p.reflow.overflow > 0, `${p.url}: 350px does not fit in 320px`)
+    }
+    assert.equal(most, 1, 'never more than one browser open at a time')
+    assert.equal(started.length, 3, 'a new browser after every second page')
+    assert.equal(alive, 0, 'and none left open')
+    assert.ok(HELP.includes('--restart-every <n>'))
+  } finally { Browser.prototype.start = start; Browser.prototype.close = close; site.close() }
+})
+
+// ── --public-only, by the ways it is usually got round (#51) ────────────────
+
+test('guard: a name with no dot is refused whatever it resolves to, and a trailing dot changes nothing', async () => {
+  const anywhere = { resolve: async () => [{ address: '8.8.8.8', family: 4 }] } // a resolver that calls everything public
+  for (const h of ['db', 'redis', 'web_proxy', 'intranet', 'localhost', 'localhost.', 'LOCALHOST', 'dev.localhost.', 'printer.local.', '2130706433', '0x7f000001', '017700000001', '']) {
+    await assert.rejects(publicAddresses(h, anywhere), /is not a public host/, h)
+  }
+  assert.deepEqual(await publicAddresses('example.com.', anywhere), [{ address: '8.8.8.8', family: 4 }])
+  assert.ok(isLocalName('db') && isLocalName('a.localhost') && isLocalName('nas.local') && !isLocalName('example.com'))
+  await assert.rejects(publicAddresses('gone.test', { resolve: async () => [] }), /did not resolve/)
+})
+
+test('guard: an IPv4 address written as a number, in octal, in hex or inside IPv6 is the address it means', async () => {
+  for (const u of ['http://2130706433/', 'http://0x7f000001/', 'http://0177.0.0.1/', 'http://0x7f.0.0.1/', 'http://127.1/', 'http://017700000001/', 'http://3232235777/', 'http://0xa9fea9fe/',
+    'http://[::1]/', 'http://[0:0:0:0:0:0:0:1]/', 'http://[::ffff:127.0.0.1]/', 'http://[::ffff:7f00:1]/', 'http://[0:0:0:0:0:ffff:7f00:1]/', 'http://[::ffff:169.254.169.254]/', 'http://[::ffff:a9fe:a9fe]/',
+    'http://[fe80::1]/', 'http://[fec0::1]/', 'http://[fd00:ec2::254]/', 'http://user:pass@127.0.0.1/', 'http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1./']) {
+    await assert.rejects(assertPublicHost(u), /not public/, u)
+  }
+  assert.equal(isPrivateAddress('fec0::1'), true); assert.equal(isPrivateAddress('feff::1'), true); assert.equal(isPrivateAddress('fe7f::1'), false)
+  assert.deepEqual(await assertPublicHost('http://8.8.8.8/'), [{ address: '8.8.8.8', family: 4 }], 'and it answers with the addresses it checked')
+})
+
+test('egress filter: every spelling of a private address is refused, as a request and as a CONNECT', async () => {
+  const t = target(); const port = await t.listen()
+  const f = await startEgressFilter() // the real resolver and the real rules
+  try {
+    for (const host of ['2130706433', '0x7f000001', '0177.0.0.1', '0x7f.0.0.1', '127.1', '[::1]', '[::ffff:127.0.0.1]', '[::ffff:7f00:1]', '[0:0:0:0:0:0:0:1]', 'localhost.', 'LOCALHOST', 'db', 'web_proxy']) {
+      assert.equal((await tunnel(f.port, `${host}:${port}`)).status, 403, `CONNECT ${host}`)
+      assert.equal((await viaProxy(f.port, `http://${host}:${port}/x`, `${host}:${port}`)).status, 403, host)
+    }
+    assert.equal((await viaProxy(f.port, `http://user:pass@127.0.0.1:${port}/x`, 'x')).status, 403)
+    assert.deepEqual(t.hits, [], 'nothing reached the private target')
+  } finally { await f.close(); t.server.close() }
+})
+
+test('egress filter: a name whose answer changes is checked on every request, and each request goes where its own check pointed', async () => {
+  const pub = target('127.0.0.1'); const port = await pub.listen()
+  const trap = target('127.0.0.2'); await new Promise((r) => trap.server.listen(port, '127.0.0.2', r))
+  let lookups = 0
+  const f = await startEgressFilter({ resolve: async () => [{ address: ++lookups === 1 ? '127.0.0.1' : '127.0.0.2' }], isPrivate: (a) => a !== '127.0.0.1' })
+  try {
+    const first = await viaProxy(f.port, `http://flip.test:${port}/first`, `flip.test:${port}`)
+    assert.equal(first.status, 200)
+    assert.equal(lookups, 1, 'one lookup: the address that was checked is the address connected to')
+    assert.equal((await viaProxy(f.port, `http://flip.test:${port}/second`, `flip.test:${port}`)).status, 403)
+    assert.equal((await tunnel(f.port, `flip.test:${port}`)).status, 403)
+    assert.deepEqual(pub.hits.map((h) => h.path), ['/first'])
+    assert.deepEqual(trap.hits, [], 'the address it changed to was never connected to')
+  } finally { await f.close(); pub.server.close(); trap.server.close() }
+})
+
+test('egress filter: it speaks http and CONNECT; ftp, ws and file addresses get nowhere, and an upgrade is a request like any other', async () => {
+  const t = target(); const port = await t.listen()
+  const f = await startEgressFilter()
+  try {
+    for (const url of [`ftp://127.0.0.1:${port}/x`, `ws://127.0.0.1:${port}/x`, `wss://127.0.0.1:${port}/x`, 'file:///etc/passwd', `gopher://127.0.0.1:${port}/x`]) assert.equal((await viaProxy(f.port, url, 'x')).status, 400, url)
+    const upgrade = await new Promise((resolve, reject) => {
+      const req = request({ host: '127.0.0.1', port: f.port, path: `http://127.0.0.1:${port}/socket`, headers: { host: `127.0.0.1:${port}`, connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==', 'sec-websocket-version': '13' } })
+      req.on('response', (res) => { res.resume(); resolve(res.statusCode) }); req.on('upgrade', (res) => resolve(res.statusCode)); req.on('error', reject); req.end()
+    })
+    assert.equal(upgrade, 403)
+    assert.deepEqual(t.hits, [])
+  } finally { await f.close(); t.server.close() }
+})
+
+// Everything a page can ask a browser for, aimed at a listener on a private
+// address (127.0.0.2). With every rule switched off each one arrives, which is
+// what makes the second run mean something; with the rules on, none does - no
+// request, and no connection either.
+test('a real browser: no request a page can make reaches a private address - names with no dot, numbers, IPv6, redirects, WebSockets, a name that changes', { skip: chrome ? false : 'no Chrome, Edge or Chromium here' }, async () => {
+  const pub = target('127.0.0.3'); const P = await pub.listen()
+  const trap = { hits: [], conns: 0 }
+  const trapServer = createServer((req, res) => { trap.hits.push(req.url); res.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' }); res.end('<title>trap</title>reached') })
+  trapServer.on('connection', () => { trap.conns++ })
+  trapServer.on('upgrade', (req, socket) => { trap.hits.push(`ws ${req.url}`); socket.destroy() })
+  await new Promise((r) => trapServer.listen(P, '127.0.0.2', r))
+  const other = { conns: 0 } // anything that is not http: an ftp address
+  const otherServer = createTcpServer((s) => { other.conns++; s.destroy() })
+  const R = await listen(otherServer, '127.0.0.2')
+  const site = createServer((req, res) => {
+    const to = (location) => { res.writeHead(302, { Location: location }); res.end() }
+    if (req.url.startsWith('/to-address/')) return to(`http://127.0.0.2:${P}/redirected-${req.url.slice(12)}`)
+    if (req.url === '/to-name') return to(`http://sibling:${P}/redirected-to-a-name`)
+    if (req.url !== '/') { res.writeHead(404); return res.end() }
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<!doctype html><html lang="en"><head><title>probe</title></head><body>
+<img src="http://sibling:${P}/img-no-dot" alt=""><img src="http://db_1:${P}/img-underscore" alt="">
+<iframe title="a" src="http://sibling:${P}/frame-no-dot"></iframe><iframe title="b" src="http://127.0.0.2:${P}/frame-loopback"></iframe>
+<img src="http://2130706434:${P}/img-decimal" alt=""><img src="http://0x7f.0.0.2:${P}/img-hex" alt=""><img src="http://0177.0.0.2:${P}/img-octal" alt=""><img src="http://127.2:${P}/img-short" alt="">
+<img src="http://[::ffff:127.0.0.2]:${P}/img-mapped" alt=""><img src="http://[::1]:${P}/img-v6" alt=""><img src="http://localhost.:${P}/img-localhost-dot" alt="">
+<img src="/to-address/img" alt=""><img src="/to-name" alt=""><iframe title="c" src="/to-address/frame"></iframe>
+<img src="ftp://127.0.0.2:${R}/ftp" alt=""><iframe title="d" src="ftp://127.0.0.2:${R}/ftp-frame"></iframe><iframe title="e" src="file:///etc/hosts"></iframe>
+<script>
+const all = []
+const ask = (url) => fetch(url, { mode: 'no-cors' })
+all.push(ask('http://127.0.0.2:${P}/fetch-loopback'), ask('http://sibling:${P}/fetch-no-dot'), ask('/to-address/fetch'), ask('file:///etc/hosts'))
+all.push(ask('http://flip.test:${P}/flip-1').then(() => ask('http://flip.test:${P}/flip-2')))
+for (const url of ['ws://127.0.0.2:${P}/socket-loopback', 'ws://sibling:${P}/socket-no-dot']) all.push(new Promise((done) => { const w = new WebSocket(url); w.onopen = w.onerror = w.onclose = done }))
+navigator.sendBeacon('http://127.0.0.2:${P}/beacon', 'x')
+const stream = new EventSource('http://127.0.0.2:${P}/event-source'); stream.onerror = () => stream.close()
+window.settled = Promise.allSettled(all).then(() => true)
+</script></body></html>`)
+  })
+  const sitePort = await listen(site)
+  let flips = 0
+  const resolve = async (h) => {
+    if (h === 'page.test') return [{ address: '127.0.0.1' }]
+    if (h === 'sibling' || h === 'db_1') return [{ address: '127.0.0.2' }]
+    if (h === 'flip.test') return [{ address: ++flips === 1 ? '127.0.0.3' : '127.0.0.2' }]
+    throw new Error('offline in this test')
+  }
+  const visit = async (rules) => {
+    trap.hits.length = 0; trap.conns = 0; other.conns = 0; pub.hits.length = 0; flips = 0
+    const f = await startEgressFilter({ resolve, ...rules })
+    const b = new Browser(chrome, 1280, f.chromeFlags(), { callTimeout: 20000 })
+    try {
+      await b.start()
+      await b.open(`http://page.test:${sitePort}/`, 15000)
+      await b.evaluate('window.settled')
+      await new Promise((r) => setTimeout(r, 1500)) // the beacon, the event stream and the frames
+      await b.open(`http://page.test:${sitePort}/to-address/page`, 15000).catch(() => {})
+      return { hits: [...trap.hits], conns: trap.conns, other: other.conns, pub: pub.hits.map((h) => h.path), refused: f.refused }
+    } finally { await b.close(); await f.close() }
+  }
+  try {
+    const open = await visit({ isPrivate: () => false, localName: () => false })
+    for (const reached of ['/img-no-dot', '/img-underscore', '/frame-no-dot', '/frame-loopback', '/img-decimal', '/img-hex', '/img-octal', '/img-short', '/img-mapped',
+      '/redirected-img', '/redirected-frame', '/redirected-fetch', '/redirected-page', '/redirected-to-a-name', '/fetch-loopback', '/fetch-no-dot', 'ws /socket-loopback', 'ws /socket-no-dot', '/flip-2', '/beacon', '/event-source']) {
+      assert.ok(open.hits.includes(reached), `with every rule off, ${reached} arrives: ${open.hits.join(' ')}`)
+    }
+    assert.equal(open.other, 0, 'an ftp address opens no connection even then: the browser no longer speaks it')
+
+    const guarded = await visit({ isPrivate: (a) => a !== '127.0.0.1' && a !== '127.0.0.3' })
+    assert.deepEqual(guarded.hits, [], 'no request reached the private address')
+    assert.equal(guarded.conns, 0, 'and no connection was opened to it')
+    assert.equal(guarded.other, 0)
+    assert.deepEqual(guarded.pub, ['/flip-1'], 'the name was reached while it was public, and not after it changed')
+    assert.ok(guarded.refused >= 20, `refused ${guarded.refused}`)
+  } finally { site.close(); trapServer.close(); otherServer.close(); pub.server.close() }
+})
+
+test('requestAt: the request goes to the address it was given, not to a lookup of the name', async () => {
+  const t = target(); const port = await t.listen()
+  try {
+    // nowhere.test is not in any DNS: an answer proves the name was never looked up.
+    const r = await requestAt(`http://nowhere.test:${port}/page?q=1`, [{ address: '127.0.0.1' }], { method: 'HEAD' })
+    assert.equal(r.status, 200)
+    assert.deepEqual(t.hits, [{ path: '/page?q=1', host: `nowhere.test:${port}` }])
+    assert.equal((await requestAt(`http://nowhere.test:${port}/again`, [{ address: '127.0.0.1', family: 4 }])).text, 'reached')
+  } finally { t.server.close() }
+})
+
+test('sitemaps under --public-only: a private sitemap, a private child of a public index and a redirect to a private address are refused before they are asked for', async () => {
+  const priv = target('127.0.0.2'); const privPort = await priv.listen()
+  const asked = []
+  const pubServer = createServer((req, res) => {
+    asked.push(req.url)
+    const xml = (body) => { res.writeHead(200, { 'Content-Type': 'application/xml' }); res.end(body) }
+    const here = `http://pub.test:${pubServer.address().port}`
+    if (req.url === '/pages.xml') return xml(`<urlset><url><loc>${here}/a</loc></url><url><loc>${here}/b</loc></url></urlset>`)
+    if (req.url === '/index.xml') return xml(`<sitemapindex><sitemap><loc>${here}/pages.xml</loc></sitemap><sitemap><loc>http://127.0.0.2:${privPort}/child.xml</loc></sitemap></sitemapindex>`)
+    if (req.url === '/hop.xml') { res.writeHead(301, { Location: '/pages.xml' }); return res.end() }
+    if (req.url === '/moved.xml') { res.writeHead(302, { Location: `http://127.0.0.2:${privPort}/landing.xml` }); return res.end() }
+    res.writeHead(404); res.end()
+  })
+  const pubPort = await listen(pubServer)
+  const here = `http://pub.test:${pubPort}`
+  // pub.test stands for a public host: it is "checked" to 127.0.0.1, and is in no DNS, so reaching it proves the fetch used the checked address.
+  const held = { publicOnly: true, check: async (u) => (new URL(u).hostname === 'pub.test' ? [{ address: '127.0.0.1', family: 4 }] : assertPublicHost(u)) }
+  try {
+    assert.deepEqual(await readSitemap(`${here}/pages.xml`, held), [`${here}/a`, `${here}/b`])
+    assert.deepEqual(await readSitemap(`${here}/hop.xml`, held), [`${here}/a`, `${here}/b`], 'a redirect that stays public is followed')
+    await assert.rejects(readSitemap(`${here}/index.xml`, held), /127\.0\.0\.2, which is not public/)
+    await assert.rejects(readSitemap(`${here}/moved.xml`, held), /127\.0\.0\.2, which is not public/)
+    await assert.rejects(readSitemap(`http://127.0.0.2:${privPort}/sitemap.xml`, { publicOnly: true }), /not public/)
+    await assert.rejects(readSitemap(`http://db:${privPort}/sitemap.xml`, { publicOnly: true }), /not a public host/)
+    if (chrome) await assert.rejects(sweep(parseArgs(['--sitemap', `http://127.0.0.2:${privPort}/sitemap.xml`, '--public-only', '--quiet', '--chrome', chrome]), () => {}), /not public/)
+    assert.deepEqual(priv.hits, [], 'the private address was never asked for anything')
+    // Without --public-only the same sitemap is fetched: a dev server is the tool's commonest target.
+    assert.deepEqual(await readSitemap(`http://127.0.0.2:${privPort}/sitemap.xml`), [])
+    assert.equal(priv.hits.length, 1)
+  } finally { pubServer.close(); priv.server.close() }
 })
